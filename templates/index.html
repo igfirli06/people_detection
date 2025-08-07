@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Streaming CCTV</title>
+</head>
+<body>
+    <h1>Live Streaming CCTV dengan Deteksi Orang</h1>
+    {% for camera in cameras %}
+        <h2>{{ camera.name }}</h2>
+        <img src="{{ url_for('video_feed', camera_id=loop.index0) }}" width="640" height="360">
+        <hr>
+    {% endfor %}
+</body>
+</html>
