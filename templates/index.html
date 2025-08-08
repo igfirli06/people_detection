@@ -1,14 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-    <title>Live Streaming CCTV</title>
+  <meta charset="utf-8">
+  <title>Monitoring Kamera</title>
 </head>
 <body>
-    <h1>Live Streaming CCTV dengan Deteksi Orang</h1>
-    {% for camera in cameras %}
-        <h2>{{ camera.name }}</h2>
-        <img src="{{ url_for('video_feed', camera_id=loop.index0) }}" width="640" height="360">
-        <hr>
+  <h1>Monitoring Kamera</h1>
+  <p><a href="/add_camera">Tambah Kamera</a></p>
+  <div style="display:flex;flex-wrap:wrap;gap:20px;">
+    {% for cam in cameras %}
+      <div style="border:1px solid #ccc;padding:10px;">
+        <h3>{{ cam.name }}</h3>
+        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" width="640" height="360" />
+      </div>
     {% endfor %}
+  </div>
 </body>
 </html>
