@@ -1,16 +1,18 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Tambah Kamera</title>
+    <meta charset="utf-8">
+    <title>Tambah Kamera</title>
 </head>
 <body>
-  <h1>Tambah Kamera</h1>
-  <form method="post" action="/add_camera">
-    <label>Nama: <input type="text" name="name" required></label><br>
-    <label>RTSP: <input type="text" name="rtsp" required style="width:600px;"></label><br>
-    <button type="submit">Tambah</button>
-  </form>
-  <p><a href="/">Kembali</a></p>
+    <h1>Tambah Kamera</h1>
+    <form method="post">
+        <label>Nama Kamera:</label><br>
+        <input type="text" name="name" required><br><br>
+        <label>RTSP URL:</label><br>
+        <input type="text" name="rtsp_url" required style="width:600px"><br><br>
+        <button type="submit">Simpan</button>
+    </form>
+    <p><a href="{{ url_for('index') }}">Kembali</a></p>
 </body>
 </html>

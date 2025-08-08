@@ -1,225 +1,183 @@
-# app.py
 import cv2
 import time
-import os
 import threading
-import pymysql
-from flask import Flask, Response, render_template, request, redirect, url_for, flash
-from ultralytics import YOLO
+import os
 from datetime import datetime
-
-# ===== CONFIG =====
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'user': 'root',
-    'password': '',      
-    'db': 'people_detection',
-    'charset': 'utf8mb4',
-    'cursorclass': pymysql.cursors.DictCursor
-}
-
-RECORDING_FOLDER = 'recordings'
-MODEL_PATH = 'yolov8n.pt'
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 360
-FPS = 20.0
-FRAME_SKIP = 5
-
-os.makedirs(RECORDING_FOLDER, exist_ok=True)
+from flask import Flask, Response, render_template, request, redirect, url_for
+from ultralytics import YOLO
+from database import get_connection
 
 app = Flask(__name__)
-app.secret_key = 'ganti'
+model = YOLO("yolov8n.pt")
 
+camera_streams = {}
+recording_status = {}   # status rekaman ON/OFF
+video_writers = {}      # object VideoWriter
+record_start_time = {}  # waktu mulai rekam
 
-model = YOLO(MODEL_PATH)
+# folder simpan rekaman
+if not os.path.exists("recordings"):
+    os.makedirs("recordings")
 
+def ensure_table_exists():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cctv (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        rtsp_url TEXT NOT NULL,
+        is_active TINYINT(1) DEFAULT 1
+    )
+    """)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-cameras = {}
-cameras_lock = threading.Lock()
+def load_cameras():
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM cctv WHERE is_active = 1")
+    cameras = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    # pastikan setiap kamera punya status default
+    for cam in cameras:
+        recording_status.setdefault(cam['id'], False)
+        video_writers.setdefault(cam['id'], None)
+        record_start_time.setdefault(cam['id'], None)
+    return cameras
 
+def draw_thick_text(img, text, org, font, font_scale, color, thickness, line_type=cv2.LINE_AA):
+    cv2.putText(img, text, org, font, font_scale, (0, 0, 0), thickness + 2, line_type)
+    cv2.putText(img, text, org, font, font_scale, color, thickness, line_type)
 
-def get_active_cameras_from_db():
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, name, rtsp_url, is_active FROM cctv WHERE is_active=1")
-            rows = cur.fetchall()
-        return rows
-    finally:
-        conn.close()
-
-def insert_camera_to_db(name, rtsp_url, is_active=1):
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO cctv (name, rtsp_url, is_active) VALUES (%s, %s, %s)",
-                        (name, rtsp_url, is_active))
-            conn.commit()
-            return cur.lastrowid
-    finally:
-        conn.close()
-
-
-def start_camera_thread(cam):
-    t = threading.Thread(target=detect_people, args=(cam,), daemon=True)
-    cam['thread'] = t
-    t.start()
-
-def detect_people(cam):
-    rtsp = cam['rtsp']
-    name = cam['name']
-    safe_name = name.replace(' ', '_')
-    print(f"[INFO] Starting detection for camera {name} (id={cam['id']})")
-
-    cap = cv2.VideoCapture(rtsp)
-    if not cap.isOpened():
-        print(f"[ERROR] Gagal membuka RTSP: {rtsp} for {name}")
-    
-        while not cap.isOpened():
+def generate_frames(rtsp_url, cam_id):
+    while True:
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            try:
+                cap.release()
+            except:
+                pass
             time.sleep(3)
-            cap = cv2.VideoCapture(rtsp)
-            if cap.isOpened():
-                print(f"[INFO] Reconnected to {name}")
+            continue
+
+        while True:
+            success, frame = cap.read()
+            if not success or frame is None:
                 break
 
-    cam['cap'] = cap
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    start_time = time.time()
-    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    filename = os.path.join(RECORDING_FOLDER, f"{safe_name}_{timestamp}.avi")
-    out = cv2.VideoWriter(filename, fourcc, FPS, (cam.get('width', FRAME_WIDTH), cam.get('height', FRAME_HEIGHT)))
-
-    frame_counter = 0
-    while True:
-        success, frame = cap.read()
-        if not success or frame is None:
-            print(f"[WARNING] Tidak dapat membaca frame dari {name}, mencoba reconnect...")
-            cap.release()
-            cam['cap'] = None
-            time.sleep(2)
-            cap = cv2.VideoCapture(rtsp)
-            if not cap.isOpened():
-                time.sleep(3)
-                continue
-            else:
-                cam['cap'] = cap
+            try:
+                results = model(frame)
+            except:
+                draw_thick_text(frame, "Model error", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,255), 3)
+                ret, buffer = cv2.imencode('.jpg', frame)
+                if not ret:
+                    continue
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
                 continue
 
-      
-        frame_resized = cv2.resize(frame, (cam.get('width', FRAME_WIDTH), cam.get('height', FRAME_HEIGHT)))
-        frame_counter += 1
+            person_count = 0
+            for r in results:
+                boxes = getattr(r, 'boxes', [])
+                for box in boxes:
+                    try:
+                        cls = int(box.cls[0]) if hasattr(box.cls, "__len__") else int(box.cls)
+                        label = model.names[cls]
+                    except:
+                        label = None
 
-        with cam['lock']:
-            cam['latest_frame'] = frame_resized.copy()
+                    if label == "person":
+                        xy = box.xyxy[0] if hasattr(box, 'xyxy') else None
+                        if xy is not None:
+                            x1, y1, x2, y2 = map(int, xy)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 7)  # tebal
+                            draw_thick_text(frame, "Person", (x1, max(20, y1 - 10)),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 3)
+                            person_count += 1
 
-        if frame_counter % FRAME_SKIP != 0:
-            time.sleep(0.005)
-            continue
+            draw_thick_text(frame, f"People: {person_count}", (10, 35),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
 
-        results = model(frame_resized, verbose=False)
-        people = [box for box in results[0].boxes if int(box.cls[0]) == 0]
-        current_count = len(people)
+            # ==== Rekaman ====
+            if recording_status[cam_id]:
+                if video_writers[cam_id] is None:
+                    filename = f"recordings/cam{cam_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    h, w = frame.shape[:2]
+                    video_writers[cam_id] = cv2.VideoWriter(filename, fourcc, 20.0, (w, h))
+                    record_start_time[cam_id] = time.time()
 
-       
-        for box in people:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(frame_resized, f"People: {current_count}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-        out.write(frame_resized)
-        with cam['lock']:
-            cam['latest_frame'] = frame_resized.copy()
+                video_writers[cam_id].write(frame)
 
-        if time.time() - start_time >= 60:
-            out.release()
-            start_time = time.time()
-            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            filename = os.path.join(RECORDING_FOLDER, f"{safe_name}_{timestamp}.avi")
-            out = cv2.VideoWriter(filename, fourcc, FPS, (cam.get('width', FRAME_WIDTH), cam.get('height', FRAME_HEIGHT)))
+                # stop otomatis setelah 60 detik
+                if time.time() - record_start_time[cam_id] >= 60:
+                    video_writers[cam_id].release()
+                    video_writers[cam_id] = None
+                    recording_status[cam_id] = False
+                    record_start_time[cam_id] = None
 
-        time.sleep(0.005)
+            elif video_writers[cam_id] is not None:
+                video_writers[cam_id].release()
+                video_writers[cam_id] = None
 
-
-def gen_frames(camera_id):
-    cam_id = int(camera_id)
-    while True:
-        with cameras_lock:
-            cam = cameras.get(cam_id)
-        if cam is None:
-            time.sleep(0.2)
-            continue
-        with cam['lock']:
-            frame = cam.get('latest_frame')
-            if frame is None:
-                time.sleep(0.05)
-                continue
             ret, buffer = cv2.imencode('.jpg', frame)
             if not ret:
-                time.sleep(0.02)
                 continue
-            img_bytes = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n')
-        time.sleep(0.01)
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+        try:
+            cap.release()
+        except:
+            pass
+        time.sleep(3)
 
 @app.route('/')
 def index():
-    with cameras_lock:
-        cams = [{'id': cam_id, 'name': cam['name']} for cam_id, cam in cameras.items()]
-    return render_template('index.html', cameras=cams)
+    cameras = load_cameras()
+    return render_template('index.html', cameras=cameras, recording_status=recording_status)
 
 @app.route('/video_feed/<int:camera_id>')
 def video_feed(camera_id):
-    return Response(gen_frames(camera_id), mimetype='multipart/x-mixed-replace; boundary=frame')
+    cameras = load_cameras()
+    for cam in cameras:
+        if cam['id'] == camera_id:
+            return Response(generate_frames(cam['rtsp_url'], cam['id']),
+                            mimetype='multipart/x-mixed-replace; boundary=frame')
+    return "Camera not found", 404
+
+@app.route('/toggle_record/<int:camera_id>', methods=['POST'])
+def toggle_record(camera_id):
+    recording_status[camera_id] = not recording_status.get(camera_id, False)
+    return redirect(url_for('index'))
 
 @app.route('/add_camera', methods=['GET', 'POST'])
 def add_camera():
     if request.method == 'POST':
-        name = request.form.get('name')
-        rtsp = request.form.get('rtsp')
-        if not name or not rtsp:
-            flash('Nama dan RTSP wajib diisi', 'danger')
-            return redirect(url_for('add_camera'))
-        cam_id = insert_camera_to_db(name, rtsp, 1)
-        cam = {
-            'id': cam_id,
-            'name': name,
-            'rtsp': rtsp,
-            'cap': None,
-            'latest_frame': None,
-            'lock': threading.Lock(),
-            'width': FRAME_WIDTH,
-            'height': FRAME_HEIGHT,
-            'fps': FPS,
-            'thread': None
-        }
-        with cameras_lock:
-            cameras[cam_id] = cam
-        start_camera_thread(cam)
-        flash('Kamera berhasil ditambahkan dan deteksi dijalankan', 'success')
+        name = request.form['name']
+        rtsp_url = request.form['rtsp_url']
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO cctv (name, rtsp_url, is_active) VALUES (%s, %s, 1)",
+                       (name, rtsp_url))
+        conn.commit()
+        cursor.close()
+        conn.close()
         return redirect(url_for('index'))
     return render_template('add_camera.html')
 
+@app.route('/deactivate/<int:camera_id>', methods=['POST'])
+def deactivate(camera_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE cctv SET is_active = 0 WHERE id = %s", (camera_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('index'))
 
-def load_cameras_and_start():
-    rows = get_active_cameras_from_db()
-    for r in rows:
-        cam_id = int(r['id'])
-        cam = {
-            'id': cam_id,
-            'name': r['name'],
-            'rtsp': r['rtsp_url'],
-            'cap': None,
-            'latest_frame': None,
-            'lock': threading.Lock(),
-            'width': FRAME_WIDTH,
-            'height': FRAME_HEIGHT,
-            'fps': FPS,
-            'thread': None
-        }
-        with cameras_lock:
-            cameras[cam_id] = cam
-        start_camera_thread(cam)
-
-if __name__ == '__main__':
-    load_cameras_and_start()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+if __name__ == "__main__":
+    ensure_table_exists()
+    app.run(host="0.0.0.0", port=5000, debug=True)

@@ -1,19 +1,41 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Monitoring Kamera</title>
+    <meta charset="utf-8">
+    <title>People Detection - CCTV</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .cam-grid { display: flex; flex-wrap: wrap; gap: 20px; }
+        .cam-card { border: 1px solid #ddd; padding: 10px; border-radius: 6px; width: 660px; }
+        img { display: block; max-width: 100%; height: auto; }
+        .cam-actions { margin-top: 8px; display:flex; gap:10px; align-items:center; }
+    </style>
 </head>
 <body>
-  <h1>Monitoring Kamera</h1>
-  <p><a href="/add_camera">Tambah Kamera</a></p>
-  <div style="display:flex;flex-wrap:wrap;gap:20px;">
-    {% for cam in cameras %}
-      <div style="border:1px solid #ccc;padding:10px;">
-        <h3>{{ cam.name }}</h3>
-        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" width="640" height="360" />
-      </div>
-    {% endfor %}
-  </div>
+    <h1>People Detection - CCTV</h1>
+    <a href="{{ url_for('add_camera') }}">Tambah Kamera</a>
+    <div class="cam-grid">
+        {% for cam in cameras %}
+        <div class="cam-card">
+            <h3>{{ cam.name }} (id: {{ cam.id }})</h3>
+            <div>
+                <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
+            </div>
+            <div class="cam-actions">
+                <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
+                    {% if recording_status[cam.id] %}
+                        <button type="submit" style="background:red;color:white;">Stop Recording</button>
+                    {% else %}
+                        <button type="submit" style="background:green;color:white;">Start Recording</button>
+                    {% endif %}
+                </form>
+                <form action="{{ url_for('deactivate', camera_id=cam.id) }}" method="post" style="display:inline;">
+                    <button type="submit">Nonaktifkan</button>
+                </form>
+                <span>RTSP: <small>{{ cam.rtsp_url }}</small></span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 </body>
 </html>
