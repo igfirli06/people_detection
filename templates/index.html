@@ -1,41 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>People Detection - CCTV</title>
+    <meta charset="UTF-8" />
+    <title>Camera Monitoring</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .cam-grid { display: flex; flex-wrap: wrap; gap: 20px; }
-        .cam-card { border: 1px solid #ddd; padding: 10px; border-radius: 6px; width: 660px; }
-        img { display: block; max-width: 100%; height: auto; }
-        .cam-actions { margin-top: 8px; display:flex; gap:10px; align-items:center; }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
+        .camera-container { border: 1px solid #ccc; background: white; padding: 15px; margin-bottom: 20px; }
+        video, img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+        .controls { margin-top: 10px; }
+        button { padding: 8px 12px; font-size: 1rem; cursor: pointer; }
+        .count { font-weight: bold; font-size: 1.2rem; margin-left: 10px; }
     </style>
+    <script>
+        // Fungsi update jumlah orang secara berkala
+        function updatePersonCount(camId) {
+            fetch(`/person_count/${camId}`)
+                .then(response => response.json())
+                .then(data => {
+                    const el = document.getElementById(`count-${camId}`);
+                    if(el) el.textContent = data.count;
+                })
+                .catch(err => console.error(err));
+        }
+
+        // Jalankan update untuk semua kamera setiap 2 detik
+        function startUpdatingCounts(cameraIds) {
+            cameraIds.forEach(id => {
+                updatePersonCount(id);
+                setInterval(() => updatePersonCount(id), 2000);
+            });
+        }
+
+        window.onload = function() {
+            // Dapatkan semua id kamera dari elemen data attribute
+            const cams = Array.from(document.querySelectorAll('.camera-container'))
+                              .map(div => div.getAttribute('data-cam-id'));
+            startUpdatingCounts(cams);
+        }
+    </script>
 </head>
 <body>
-    <h1>People Detection - CCTV</h1>
-    <a href="{{ url_for('add_camera') }}">Tambah Kamera</a>
-    <div class="cam-grid">
-        {% for cam in cameras %}
-        <div class="cam-card">
-            <h3>{{ cam.name }} (id: {{ cam.id }})</h3>
-            <div>
-                <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
-            </div>
-            <div class="cam-actions">
-                <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
-                    {% if recording_status[cam.id] %}
-                        <button type="submit" style="background:red;color:white;">Stop Recording</button>
+    <h1>Camera Monitoring</h1>
+    
+    {% for cam in cameras %}
+    <div class="camera-container" data-cam-id="{{ cam.id }}">
+        <h2>{{ cam.name }}</h2>
+        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }} stream" />
+        <div class="controls">
+            <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
+                <button type="submit">
+                    {% if recording_status.get(cam.id) %}
+                        Stop Recording
                     {% else %}
-                        <button type="submit" style="background:green;color:white;">Start Recording</button>
+                        Start Recording
                     {% endif %}
-                </form>
-                <form action="{{ url_for('deactivate', camera_id=cam.id) }}" method="post" style="display:inline;">
-                    <button type="submit">Nonaktifkan</button>
-                </form>
-                <span>RTSP: <small>{{ cam.rtsp_url }}</small></span>
-            </div>
+                </button>
+            </form>
+            <span class="count">People detected: <span id="count-{{ cam.id }}">0</span></span>
         </div>
-        {% endfor %}
     </div>
+    {% else %}
+    <p>No cameras available.</p>
+    {% endfor %}
 </body>
 </html>
