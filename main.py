@@ -87,7 +87,7 @@ def measure_fps(cap: cv2.VideoCapture, sample_frames: int = 20, timeout: float =
 def init_writer_if_needed(cam_id: int, frame):
     if writers.get(cam_id) is None and frame is not None:
         size = (frame.shape[1], frame.shape[0])  
-        fps = DEFAULT_RECORD_FPS
+        fps = writer_info.get(cam_id, {}).get("fps", DEFAULT_RECORD_FPS)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         filename = os.path.join(RECORDINGS_DIR, f"cam{cam_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
         vw = cv2.VideoWriter(filename, fourcc, fps, size)
@@ -98,6 +98,7 @@ def init_writer_if_needed(cam_id: int, frame):
             writers[cam_id] = vw
             writer_info[cam_id] = {"filename": filename, "fps": fps, "size": size}
             app.logger.info(f"Rekaman mulai kamera {cam_id} ke {filename}")
+
 
 def close_writer(cam_id: int):
     w = writers.get(cam_id)
@@ -300,6 +301,7 @@ def detect_and_record_thread_fn(cam_id: int):
             fps = float(writer_info.get(cam_id, {}).get("fps") or DEFAULT_RECORD_FPS)
             delay = max(0.001, 1.0 / max(5.0, min(fps, 30.0)))
             time.sleep(delay)
+
     except Exception as e:
         app.logger.error(f"Fatal error in detection thread {cam_id}: {str(e)}")
     finally:
@@ -381,8 +383,6 @@ def video_feed(camera_id: int):
 @app.route("/person_count/<int:camera_id>")
 def person_count_route(camera_id: int):
     return jsonify({"count": int(people_count.get(camera_id, 0))})
-
-
 
 @app.route("/toggle_record/<int:camera_id>", methods=["POST"])
 def toggle_record(camera_id: int):
