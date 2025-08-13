@@ -4,15 +4,71 @@
     <meta charset="UTF-8" />
     <title>Camera Monitoring</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
-        .camera-container { border: 1px solid #ccc; background: white; padding: 15px; margin-bottom: 20px; }
-        video, img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-        .controls { margin-top: 10px; }
-        button { padding: 8px 12px; font-size: 1rem; cursor: pointer; }
-        .count { font-weight: bold; font-size: 1.2rem; margin-left: 10px; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .camera-container {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        .camera-container h2 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: block;
+            margin: 10px 0;
+            background: black;
+        }
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 15px;
+            font-size: 1rem;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button.delete {
+            background-color: #dc3545;
+        }
+        button.delete:hover {
+            background-color: #a71d2a;
+        }
+        .count {
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
     </style>
     <script>
-        // Fungsi update jumlah orang secara berkala
         function updatePersonCount(camId) {
             fetch(`/person_count/${camId}`)
                 .then(response => response.json())
@@ -23,7 +79,6 @@
                 .catch(err => console.error(err));
         }
 
-        // Jalankan update untuk semua kamera setiap 2 detik
         function startUpdatingCounts(cameraIds) {
             cameraIds.forEach(id => {
                 updatePersonCount(id);
@@ -32,7 +87,6 @@
         }
 
         window.onload = function() {
-            // Dapatkan semua id kamera dari elemen data attribute
             const cams = Array.from(document.querySelectorAll('.camera-container'))
                               .map(div => div.getAttribute('data-cam-id'));
             startUpdatingCounts(cams);
@@ -42,6 +96,12 @@
 <body>
     <h1>Camera Monitoring</h1>
     
+    <div style="text-align:center; margin-bottom: 30px;">
+    <a href="{{ url_for('add_camera') }}" style="text-decoration:none; font-weight:bold; color:#007bff;">
+        + Add New Camera
+    </a>
+</div>
+
     {% for cam in cameras %}
     <div class="camera-container" data-cam-id="{{ cam.id }}">
         <h2>{{ cam.name }}</h2>
@@ -56,11 +116,16 @@
                     {% endif %}
                 </button>
             </form>
+
+            <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this camera?');">
+                <button type="submit" class="delete">Delete Camera</button>
+            </form>
+
             <span class="count">People detected: <span id="count-{{ cam.id }}">0</span></span>
         </div>
     </div>
     {% else %}
-    <p>No cameras available.</p>
+    <p style="text-align:center; font-size:1.2rem; color:#666;">No cameras available.</p>
     {% endfor %}
 </body>
 </html>

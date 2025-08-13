@@ -20,37 +20,23 @@ from flask import (
 from ultralytics import YOLO
 from database import load_cameras_from_db, get_connection
 
-# =======================
-# Konfigurasi
-# =======================
 MODEL_PATH = os.environ.get("YOLO_MODEL", "yolov8n.pt")
-
-# Folder simpan rekaman
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", "recordings")
 os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
 # Deteksi
 DETECTION_SKIP = int(os.environ.get("DETECTION_SKIP", "3"))
-DETECTION_SIZE = (480, 270)  # lebih kecil biar YOLO lebih cepat
-
-# Rekaman: fps final file video
+DETECTION_SIZE = (480, 270)  
 TARGET_RECORD_FPS = float(os.environ.get("TARGET_RECORD_FPS", "25.0"))
-
-# Perlambat sedikit saat merekam (1.0 = normal, 1.25 = 25% lebih lambat)
 SLOW_FACTOR = float(os.environ.get("SLOW_FACTOR", "1.25"))
-
-# RTSP retry
 RTSP_OPEN_RETRY_SECONDS = float(os.environ.get("RTSP_RETRY", "2.0"))
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "supersecret")
 
-# Load YOLO model
 model = YOLO(MODEL_PATH)
 
-# =======================
 # Global states
-# =======================
 capture_threads = {}
 detect_threads = {}
 stop_flags = {}
@@ -63,8 +49,8 @@ frames_lock = threading.Lock()
 
 recording_locks = {}
 writers = {}
-writer_info = {}        # per cam: {"fps": float, "size": (w,h), "filename": str}
-recording_status = {}   # per cam: bool
+writer_info = {}        
+recording_status = {}   
 
 
 def init_camera_data(cams):
@@ -83,10 +69,7 @@ def init_camera_data(cams):
         recording_locks.setdefault(cid, threading.Lock())
         thread_locks.setdefault(cid, threading.Lock())
 
-
-# =======================
 # Rekaman Video (writer TARGET_RECORD_FPS)
-# =======================
 def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
     if writers.get(cam_id) is None and frame is not None:
         size = (frame.shape[1], frame.shape[0])
@@ -114,7 +97,6 @@ def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
                 f"(fps={fps:.2f}, size={size})"
             )
 
-
 def close_writer(cam_id: int):
     w = writers.get(cam_id)
     if w is not None:
@@ -130,10 +112,7 @@ def close_writer(cam_id: int):
         info["filename"] = None
         writer_info[cam_id] = info
 
-
-# =======================
 # Thread: Capture
-# =======================
 def capture_thread_fn(cam_id: int, rtsp_url: str):
     cap = None
     backoff = RTSP_OPEN_RETRY_SECONDS
@@ -144,6 +123,7 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
             try:
                 if cap is None or not cap.isOpened():
                     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     if not cap.isOpened():
                         cap = cv2.VideoCapture(rtsp_url)
                     if not cap.isOpened():
@@ -198,10 +178,7 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
                 pass
         app.logger.info(f"Capture thread stopped for camera {cam_id}")
 
-
-# =======================
 # Deteksi + Rekam (paralel)
-# =======================
 def process_detection(frame, cam_id: int, resize_for_det: Tuple[int, int] = DETECTION_SIZE):
     """
     Return: (annotated_frame, people_count)
@@ -275,7 +252,7 @@ def detect_and_record_thread_fn(cam_id: int):
     app.logger.info(f"Starting detection/record thread for camera {cam_id}")
 
     fps_asli = TARGET_RECORD_FPS or 25.0
-    fps_slow = fps_asli / max(7.0, SLOW_FACTOR)  # misal SLOW_FACTOR=2 → FPS setengahnya
+    fps_slow = fps_asli / max(6.0, SLOW_FACTOR)  
     base_interval = 1.0 / fps_slow
     next_write_ts = time.monotonic() + base_interval
 
@@ -290,7 +267,7 @@ def detect_and_record_thread_fn(cam_id: int):
                 time.sleep(0.01)
                 continue
 
-            # ======== DETEKSI ========
+            # deteksi
             run_det = (counter % max(1, DETECTION_SKIP) == 0)
             if run_det:
                 annotated, current_count = process_detection(frame, cam_id, DETECTION_SIZE)
@@ -301,7 +278,7 @@ def detect_and_record_thread_fn(cam_id: int):
                 with frames_lock:
                     annotated = annotated_frame.get(cam_id, frame)
 
-            # ======== REKAMAN (pakai annotated biar ada bounding box) ========
+            # rekam
             if recording_status.get(cam_id, False):
                 with recording_locks.setdefault(cam_id, threading.Lock()):
                     if writers.get(cam_id) is None:
@@ -337,10 +314,7 @@ def detect_and_record_thread_fn(cam_id: int):
             close_writer(cam_id)
         app.logger.info(f"Detection thread {cam_id} stopped")
 
-
-# =======================
 # Streaming MJPEG
-# =======================
 def generate_stream(cam_id: int):
     while True:
         with frames_lock:
@@ -366,17 +340,16 @@ def generate_stream(cam_id: int):
         time.sleep(0.03)
 
 
-# =======================
+
 # Thread Manager
-# =======================
 def start_camera_threads():
-    cams = load_cameras_from_db()  # <- dari database.py (cursor dictionary=True)
+    cams = load_cameras_from_db()  
     active_cams = [c for c in cams if c.get("is_active", True)]
     init_camera_data(active_cams)
 
     for cam in active_cams:
         cid = cam["id"]
-        # Ambil RTSP/url dari kolom yang ada (ikuti DB kamu)
+        # Ambil RTSP/url
         rtsp = cam.get("rtsp_url") or cam.get("url") or cam.get("rtsp")
 
         stop_flags[cid] = False
@@ -403,10 +376,7 @@ def start_camera_threads():
             if cid in detect_threads:
                 del detect_threads[cid]
 
-
-# =======================
 # Routes
-# =======================
 @app.route("/")
 def index():
     cams = load_cameras_from_db()
@@ -503,6 +473,36 @@ def shutdown_threads():
     return "All threads stopped", 200
 
 
+@app.route("/delete_camera/<int:camera_id>", methods=["POST"])
+def delete_camera(camera_id: int):
+    # Hentikan thread dan rekaman dulu
+    stop_flags[camera_id] = True
+    recording_status[camera_id] = False
+    with recording_locks.setdefault(camera_id, threading.Lock()):
+        close_writer(camera_id)
+
+    # Hapus data kamera dari database
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM cctv WHERE id = %s", (camera_id,))
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"Failed to delete camera {camera_id}: {e}")
+        flash(f"Failed to delete camera: {e}", "error")
+    finally:
+        cursor.close()
+        conn.close()
+
+    # Hapus thread dari dictionary
+    if camera_id in capture_threads:
+        del capture_threads[camera_id]
+    if camera_id in detect_threads:
+        del detect_threads[camera_id]
+
+    flash(f"Camera {camera_id} deleted successfully.", "success")
+    return redirect(url_for("index"))
+
 @app.route("/add_camera", methods=["GET", "POST"])
 def add_camera():
     if request.method == "POST":
@@ -510,7 +510,7 @@ def add_camera():
         rtsp_url = request.form.get("rtsp_url")
 
         if not name or not rtsp_url:
-            flash("Name and RTSP URL are required", "error")
+            flash("Camera name and RTSP URL are required.", "error")
             return redirect(url_for("add_camera"))
 
         conn = get_connection()
@@ -521,8 +521,7 @@ def add_camera():
                 (name, rtsp_url),
             )
             conn.commit()
-            new_id = cursor.lastrowid
-            flash(f"Camera added successfully (ID: {new_id})", "success")
+            flash("Camera added successfully!", "success")
         except Exception as e:
             conn.rollback()
             app.logger.error(f"Error adding camera: {str(e)}")
@@ -531,9 +530,11 @@ def add_camera():
             cursor.close()
             conn.close()
 
+        # Setelah tambah, refresh thread dan balik ke index
         start_camera_threads()
         return redirect(url_for("index"))
 
+    # GET request → tampilkan form
     return render_template("add_camera.html")
 
 
