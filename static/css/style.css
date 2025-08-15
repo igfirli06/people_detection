@@ -1,0 +1,131 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f9f9f9;
+    color: #333;
+}
+
+/* HEADER */
+header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+    border-bottom: 1px solid #ccc;
+    background: #fff;
+}
+header img {
+    height: 60px;
+    margin-right: 15px;
+}
+header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+}
+header p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+/* ADD CAMERA BUTTON */
+.add-camera-link {
+    text-align: right;
+    margin: 15px 20px;
+}
+.add-camera-link a {
+    background-color: #1e90ff;
+    color: white;
+    padding: 8px 15px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+.add-camera-link a:hover {
+    background-color: #0d6efd;
+}
+
+/* CAMERAS GRID */
+.cameras-wrapper {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 30px;
+    padding: 0 20px 40px;
+}
+.camera-container {
+    background: white;
+    border-radius: 15px;
+    padding: 10px;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+.camera-container h2 {
+    margin: 10px 0;
+    font-size: 1rem;
+}
+.camera-container img {
+    width: 100%;
+    border-radius: 15px;
+    background: black;
+}
+
+/* BUTTONS */
+.controls {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.btn {
+    border: none;
+    padding: 8px 15px;
+    border-radius: 20px;
+    color: white;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.btn-start {
+    background-color: #1e90ff;
+}
+.btn-start:hover {
+    background-color: #0d6efd;
+}
+.btn-delete {
+    background-color: #dc3545;
+}
+.btn-delete:hover {
+    background-color: #a71d2a;
+}
+
+/* PEOPLE DETECTION TEXT */
+.people-detection {
+    margin-top: 5px;
+    font-size: 1.9rem;
+}
+
+/* FOOTER */
+footer {
+    background-color: #1e90ff;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    margin-top: 20px;
+}
+footer p {
+    margin: 5px 0;
+}
+footer a {
+    color: white;
+    margin: 0 5px;
+    text-decoration: none;
+}
+footer a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 700px) {
+    .cameras-wrapper {
+        grid-template-columns: 1fr;
+    }
+}

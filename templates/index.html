@@ -1,131 +1,143 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <title>Camera Monitoring</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background: #f0f0f0;
-            color: #333;
-        }
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .camera-container {
-            border: 1px solid #ccc;
-            background: white;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            max-width: 700px;
-            margin-left: auto;
-            margin-right: auto;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-        }
-        .camera-container h2 {
-            margin-top: 0;
-            color: #007bff;
-        }
-        img {
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            display: block;
-            margin: 10px 0;
-            background: black;
-        }
-        .controls {
-            margin-top: 10px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        button {
-            padding: 8px 15px;
-            font-size: 1rem;
-            cursor: pointer;
-            border: none;
-            border-radius: 5px;
-            background-color: #007bff;
-            color: white;
-            transition: background-color 0.3s ease;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        button.delete {
-            background-color: #dc3545;
-        }
-        button.delete:hover {
-            background-color: #a71d2a;
-        }
-        .count {
-            font-weight: bold;
-            font-size: 1.2rem;
-        }
-    </style>
-    <script>
-        function updatePersonCount(camId) {
-            fetch(`/person_count/${camId}`)
-                .then(response => response.json())
-                .then(data => {
-                    const el = document.getElementById(`count-${camId}`);
-                    if(el) el.textContent = data.count;
-                })
-                .catch(err => console.error(err));
-        }
+<meta charset="UTF-8" />
+<title>Camera Monitoring</title>
+<style>
+/* ================== STYLING SAMA SEPERTI TEMPLATE ANDA ================== */
+body { font-family: Arial, sans-serif; margin:0; background:#f9f9f9; color:#333; }
+header { display:flex; align-items:center; justify-content:center; padding:15px; border-bottom:1px solid #ccc; background:#fff; }
+header img { height:60px; margin-right:15px; }
+header h1 { margin:0; font-size:1.8rem; }
+header p { margin:0; font-size:0.9rem; color:#555; }
+.add-camera-link { text-align:right; margin:15px 20px; }
+.add-camera-link a { background-color:#1e90ff; color:white; padding:8px 15px; border-radius:20px; text-decoration:none; font-size:0.9rem; }
+.add-camera-link a:hover { background-color:#0d6efd; }
+.cameras-wrapper { display:grid; grid-template-columns:repeat(2,1fr); gap:30px; padding:0 20px 40px; }
+.camera-container { background:white; border-radius:15px; padding:10px; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+.camera-container h2 { margin:10px 0; font-size:1rem; }
+.camera-container img { width:100%; border-radius:15px; background:black; }
+.controls { margin-top:10px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
+.btn { border:none; padding:8px 15px; border-radius:20px; color:white; cursor:pointer; font-size:0.85rem; }
+.btn-start { background-color:#1e90ff; }
+.btn-start:hover { background-color:#0d6efd; }
+.btn-delete { background-color:#dc3545; }
+.btn-delete:hover { background-color:#a71d2a; }
+.people-detection { margin-top:5px; font-size:1.1rem; }
+.log-wrapper { padding:0 20px 40px; }
+.log-wrapper table { width:100%; border-collapse:collapse; background:white; border-radius:10px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+.log-wrapper th, .log-wrapper td { border:1px solid #ddd; padding:8px; text-align:left; }
+.log-wrapper th { background-color:#f4f4f4; }
+.log-wrapper a { display:inline-block; margin-top:10px; background:#1e90ff; color:white; padding:6px 12px; border-radius:5px; text-decoration:none; font-size:0.85rem; }
+.log-wrapper a:hover { background:#0d6efd; }
+footer { background-color:#1e90ff; color:white; text-align:center; padding:20px; margin-top:20px; }
+footer p { margin:5px 0; }
+footer a { color:white; margin:0 5px; text-decoration:none; }
+footer a:hover { text-decoration:underline; }
+@media (max-width:700px) { .cameras-wrapper { grid-template-columns:1fr; } }
+</style>
 
-        function startUpdatingCounts(cameraIds) {
-            cameraIds.forEach(id => {
-                updatePersonCount(id);
-                setInterval(() => updatePersonCount(id), 2000);
-            });
-        }
+<!-- ======= JAVASCRIPT ======= -->
+<script>
+// ===== DATA CAMERAS DARI FLASK JADI JS =====
+const cameras = {{ cameras|tojson }};
 
-        window.onload = function() {
-            const cams = Array.from(document.querySelectorAll('.camera-container'))
-                              .map(div => div.getAttribute('data-cam-id'));
-            startUpdatingCounts(cams);
-        }
-    </script>
+// ===== UPDATE PEOPLE COUNT =====
+function updatePeopleCount(cameraId) {
+    fetch(`/person_count/${cameraId}`)
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById(`people-count-${cameraId}`).innerText = data.count;
+        })
+        .catch(err => console.error("Error updating people count:", err));
+}
+
+// ===== START INTERVAL UNTUK SEMUA CAMERAS =====
+function startUpdatingCounts() {
+    cameras.forEach(cam => {
+        setInterval(() => updatePeopleCount(cam.id), 2000);
+    });
+}
+
+// ===== JALANKAN SAAT HALAMAN LOAD =====
+window.onload = startUpdatingCounts;
+</script>
+
 </head>
 <body>
-    <h1>Camera Monitoring</h1>
-    
-    <div style="text-align:center; margin-bottom: 30px;">
-    <a href="{{ url_for('add_camera') }}" style="text-decoration:none; font-weight:bold; color:#007bff;">
-        + Add New Camera
-    </a>
+
+<header>
+    <img src="{{ url_for('static', filename='ktilogo.webp') }}" alt="KTI Logo">
+    <div>
+        <h1>Kutai Timber</h1>
+        <p>Indonesia</p>
+    </div>
+</header>
+
+<div class="add-camera-link">
+    <a href="{{ url_for('add_camera') }}">tambah kamera</a>
 </div>
 
+<div class="cameras-wrapper">
     {% for cam in cameras %}
     <div class="camera-container" data-cam-id="{{ cam.id }}">
         <h2>{{ cam.name }}</h2>
-        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }} stream" />
+        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
         <div class="controls">
             <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
-                <button type="submit">
-                    {% if recording_status.get(cam.id) %}
-                        Stop Recording
-                    {% else %}
-                        Start Recording
-                    {% endif %}
+                <button type="submit" class="btn btn-start">
+                    {% if recording_status.get(cam.id) %} stop recording {% else %} start recording {% endif %}
                 </button>
             </form>
-
-            <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this camera?');">
-                <button type="submit" class="delete">Delete Camera</button>
+            <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Delete this camera?');">
+                <button type="submit" class="btn btn-delete">Delete Camera</button>
             </form>
-
-            <span class="count">People detected: <span id="count-{{ cam.id }}">0</span></span>
+        </div>
+        <div>
+            people detection : <span id="people-count-{{ cam.id }}">{{ people_count[cam.id] }}</span>
         </div>
     </div>
     {% else %}
     <p style="text-align:center; font-size:1.2rem; color:#666;">No cameras available.</p>
     {% endfor %}
+</div>
+
+<div class="log-wrapper">
+    <h2>Log Orang Keluar</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Kamera</th>
+                <th>Waktu Keluar</th>
+                <th>Keterangan</th>
+            </tr>
+        </thead>
+        <tbody id="events-body">
+            {% for event in recent_events %}
+            <tr>
+                <td>{{ event.camera_name }}</td>
+                <td>{{ event.exit_time.strftime('%Y-%m-%d %H:%M:%S') if event.exit_time else '' }}</td>
+                <td>{{ event.description }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align:center; color:#888;">Belum ada data keluar</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a href="{{ url_for('download_events') }}">Download Excel</a>
+</div>
+
+<footer>
+    <p>tidak ada kata tak mungkin semuanya hanya butuh device yang layak</p>
+    <p>igfirliiaziiza@gmail.com</p>
+    <p>
+        <a href="#"><i class="fab fa-instagram"></i></a>
+        <a href="#"><i class="fab fa-twitter"></i></a>
+    </p>
+    <p>Copyright © 2025 All for PT. Kutai Timber Indonesia</p>
+</footer>
+
 </body>
 </html>
