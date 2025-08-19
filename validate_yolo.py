@@ -3,7 +3,6 @@ import time
 import csv
 from ultralytics import YOLO
 
-# CONFIG
 CAMERAS = [
     {"id": 1, "rtsp": "rtsp://admin:kutaitimber121@192.168.1.64:554/Streaming/Channels/101", "log": "cam1_log.csv"},
     {"id": 2, "rtsp": "rtsp://admin:kutaitimber121@192.168.1.63:554/Streaming/Channels/101", "log": "cam2_log.csv"}
@@ -13,17 +12,14 @@ CONF_THRESHOLD = 0.1
 IOU_THRESHOLD = 0.2
 RESIZE_FOR_DET = (1280, 720)
 
-# INIT
 caps = [cv2.VideoCapture(cam["rtsp"]) for cam in CAMERAS]
 model = YOLO(MODEL_PATH)
 
-# Siapkan CSV untuk log
 for cam in CAMERAS:
     with open(cam["log"], mode='w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "people_count"])
 
-# LOOP DETEKSI
 while True:
     frames = []
     counts = []
@@ -93,13 +89,9 @@ while True:
 
         frames.append(annotated_frame)
         counts.append(count)
-
-        # Simpan log
         with open(CAMERAS[i]["log"], mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([time.time(), count])
-
-    # Tampilkan kedua kamera di window terpisah
     for i, frame in enumerate(frames):
         if frame is not None:
             cv2.imshow(f"Camera {CAMERAS[i]['id']}", frame)
