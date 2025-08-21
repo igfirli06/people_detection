@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Edit Zona Kamera {{ camera.id }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        .container { position: relative; display: inline-block; }
+        .container img { width: 100%; display: block; }
+        .canvas-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        #coords-display { margin-top: 10px; font-size: 0.9rem; }
+        #save-form { margin-top: 20px; }
+        .btn-save { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Edit Zona untuk {{ camera.name }}</h1>
+    
+    <div class="container">
+        <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
+        <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
+    </div>
+
+    <div id="coords-display">
+        Koordinat: <span id="coordinates">[]</span>
+    </div>
+
+    <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}">
+        <input type="hidden" name="zone_coordinates" id="zone-input">
+        <button type="submit" class="btn-save">Simpan Zona</button>
+    </form>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('drawing-canvas');
+            const videoFeed = document.getElementById('video-feed');
+            const coordsDisplay = document.getElementById('coordinates');
+            const zoneInput = document.getElementById('zone-input');
+
+            const ctx = canvas.getContext('2d');
+            let points = [];
+            
+            function resizeCanvas() {
+                canvas.width = videoFeed.offsetWidth;
+                canvas.height = videoFeed.offsetHeight;
+                redraw();
+            }
+
+            videoFeed.onload = resizeCanvas;
+            window.addEventListener('resize', resizeCanvas);
+
+            function redraw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (points.length > 1) {
+                    ctx.strokeStyle = '#FFFF00'; // Warna kuning
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const scaledPoints = points.map(p => [(p[0] / videoFeed.naturalWidth) * canvas.width, (p[1] / videoFeed.naturalHeight) * canvas.height]);
+                    
+                    ctx.moveTo(scaledPoints[0][0], scaledPoints[0][1]);
+                    for(let i = 1; i < scaledPoints.length; i++) {
+                        ctx.lineTo(scaledPoints[i][0], scaledPoints[i][1]);
+                    }
+                    if (scaledPoints.length > 2) {
+                        ctx.closePath();
+                    }
+                    ctx.stroke();
+                }
+            }
+            
+            canvas.addEventListener('click', function(event) {
+                const rect = canvas.getBoundingClientRect();
+                const x = Math.round(event.clientX - rect.left);
+                const y = Math.round(event.clientY - rect.top);
+                
+                const originalWidth = videoFeed.naturalWidth;
+                const originalHeight = videoFeed.naturalHeight;
+                const scaledX = Math.round((x / canvas.width) * originalWidth);
+                const scaledY = Math.round((y / canvas.height) * originalHeight);
+                
+                points.push([scaledX, scaledY]);
+                
+                coordsDisplay.textContent = JSON.stringify(points);
+                zoneInput.value = JSON.stringify(points);
+
+                redraw();
+            });
+
+            const initialZone = {{ current_zone|tojson }};
+            if (initialZone && initialZone.length > 2) {
+                points = initialZone;
+                coordsDisplay.textContent = JSON.stringify(points);
+                zoneInput.value = JSON.stringify(points);
+                videoFeed.onload = function() {
+                    resizeCanvas();
+                };
+            }
+        });
+    </script>
+</body>
+</html>

@@ -54,30 +54,46 @@ last_people_count: Dict[int, int] = {}
 last_write_time: Dict[int, float] = {}
 CAM_ZONES: Dict[int, List[Tuple[int, int]]] = {}
 
-ZONES_FALLBACK = {
-    1: [[353, 144], [301, 699], [895, 688], [916, 148]],
-    2: [[469, 61], [388, 720], [994, 720], [1011, 99]]
-}
+# ZONES_FALLBACK dihapus
+# ZONES_FALLBACK = {
+#     1: [[719, 40], [1339, 49], [1331, 629], [639, 653]]
+# }
+
 try:
     model = YOLO(MODEL_PATH)
 except Exception as e:
     app.logger.error(f"Gagal load YOLO model di {MODEL_PATH}: {e}")
     model = None
 
-def is_inside_zone(bbox, zone_points):
-    """
-    bbox: (x1, y1, x2, y2)
-    zone_points: list of [x, y] lists (polygon)
-    """
+def is_inside_zone(bbox, zone_points, min_overlap_ratio=0.2): 
     bx1, by1, bx2, by2 = bbox
-    center_x = int((bx1 + bx2) / 2)
-    center_y = int((by1 + by2) / 2)
-
+    bbox_area = (bx2 - bx1) * (by2 - by1)
+    if bbox_area <= 0:
+        return False
+    
+    # Check if bbox coordinates are valid for image dimensions
+    if bx1 > DETECTION_SIZE[0] or by1 > DETECTION_SIZE[1] or bx2 < 0 or by2 < 0:
+        return False
+    
     pts = np.array(zone_points, np.int32)
-    pts = pts.reshape((-1, 1, 2))
-
-    inside = cv2.pointPolygonTest(pts, (center_x, center_y), False)
-    return inside >= 0
+    poly_mask = np.zeros(DETECTION_SIZE[::-1], dtype=np.uint8)
+    cv2.fillPoly(poly_mask, [pts], 255)
+    
+    bbox_mask = np.zeros_like(poly_mask)
+    # Ensure bbox coordinates are within image bounds before creating mask
+    x_min = max(0, int(bx1))
+    y_min = max(0, int(by1))
+    x_max = min(DETECTION_SIZE[0], int(bx2))
+    y_max = min(DETECTION_SIZE[1], int(by2))
+    
+    cv2.rectangle(bbox_mask, (x_min, y_min), (x_max, y_max), 255, -1)
+    
+    intersection_mask = cv2.bitwise_and(poly_mask, bbox_mask)
+    intersection_area = np.sum(intersection_mask > 0)
+    
+    # Use max(1, bbox_area) to prevent division by zero
+    overlap_ratio = intersection_area / max(1, bbox_area)
+    return overlap_ratio >= min_overlap_ratio
 
 def ensure_schema() -> None:
     """Pastikan semua tabel inti tersedia."""
@@ -231,36 +247,34 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         last_people_count.setdefault(cid, 0)
         last_write_time.setdefault(cid, 0.0)
 
-        # Ambil zona dari DB
+
         zone_points = []
         z = cam.get("zone")
         
-        if isinstance(z, list):
-            zone_points = z
-        else:
-            if z:
-                try:
-                    zone_points = json.loads(z.strip())
-                except (json.JSONDecodeError, TypeError) as e:
-                    app.logger.warning(f"Zone tidak valid untuk kamera {cid}: '{z}' -> {e}")
-                    zone_points = []
+        if isinstance(z, str) and z.strip():  
+            try:
+                zone_points = json.loads(z.strip())
+            except (json.JSONDecodeError, TypeError) as e:
+                app.logger.warning(f"Zone tidak valid untuk kamera {cid}: '{z}' -> {e}")
+                zone_points = []
+        elif isinstance(z, list) and z:
+             zone_points = z
 
         if not zone_points or len(zone_points) < 3:
-            zone_points = ZONES_FALLBACK.get(cid, [])
-            if not zone_points:
-                app.logger.warning(f"Tidak ada zona valid untuk kamera {cid}. Deteksi akan dihitung di seluruh frame.")
+            app.logger.warning(f"Tidak ada zona valid di DB untuk kamera {cid}. Deteksi akan dihitung di seluruh frame.")
+            CAM_ZONES[cid] = []
+            continue
 
         parsed_points = []
-        if zone_points:
-            try:
-                for p in zone_points:
-                    if isinstance(p, (list, tuple)) and len(p) == 2:
-                        parsed_points.append([int(p[0]), int(p[1])])
-                    else:
-                        raise ValueError("Format titik zona tidak sesuai.")
-            except (ValueError, IndexError) as e:
-                app.logger.error(f"Gagal memproses titik zona untuk kamera {cid}: {e}")
-                parsed_points = []
+        try:
+            for p in zone_points:
+                if isinstance(p, (list, tuple)) and len(p) == 2:
+                    parsed_points.append([int(p[0]), int(p[1])])
+                else:
+                    raise ValueError("Format titik zona tidak sesuai.")
+        except (ValueError, IndexError) as e:
+            app.logger.error(f"Gagal memproses titik zona untuk kamera {cid}: {e}")
+            parsed_points = []
         
         CAM_ZONES[cid] = parsed_points
 
@@ -282,7 +296,7 @@ def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
             app.logger.info(
                 f"Rekaman mulai kamera {cam_id} ke {filename} (fps={fps:.2f}, size={size})"
             )
-
+            
 def close_writer(cam_id: int):
     w = writers.get(cam_id)
     if w is not None:
@@ -290,7 +304,7 @@ def close_writer(cam_id: int):
             w.release()
         except Exception:
             pass
-        app.logger.info(f"Rekaman dihentikan kamera {cam_id}")
+    app.logger.info(f"Rekaman dihentikan kamera {cam_id}")
     writers[cam_id] = None
     info = writer_info.get(cam_id) or {}
     if "filename" in info:
@@ -330,7 +344,6 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
                 cap = None
                 time.sleep(backoff)
                 continue
-
             with frames_lock:
                 latest_frame[cam_id] = frame
                 if writer_info.get(cam_id, {}).get("size") is None:
@@ -344,20 +357,22 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
                 pass
         app.logger.info(f"Capture thread stopped for camera {cam_id}")
 
-def process_detection(frame, cam_id: int, resize_for_det=(1280, 720)):
+def process_detection(frame, cam_id: int):
     try:
         if frame is None or model is None:
             return frame, 0, "Unknown"
+        resize_for_det = DETECTION_SIZE
         small = cv2.resize(frame, resize_for_det)
+        
         results = model.predict(
             small,
-            classes=[0],  
+            classes=[0],
             verbose=False,
             conf=0.25,
             iou=0.4,
             max_det=300
         )
-
+        
         annotated = frame.copy()
         count = 0
         status_text = "Kosong"
@@ -371,6 +386,10 @@ def process_detection(frame, cam_id: int, resize_for_det=(1280, 720)):
             scaled_zone_points = [[int(x * scale_x), int(y * scale_y)] for x, y in zone_points]
             zone_np = np.array(zone_points, np.int32)
             cv2.polylines(annotated, [zone_np], isClosed=True, color=(255, 255, 0), thickness=2)
+        
+        # Check if there are any people detected
+        if any(len(r.boxes) > 0 for r in results):
+            status_text = "Orang terdeteksi"
 
         for r in results:
             if not hasattr(r, "boxes") or r.boxes is None:
@@ -378,33 +397,34 @@ def process_detection(frame, cam_id: int, resize_for_det=(1280, 720)):
             for box in r.boxes:
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 conf = float(box.conf[0])
-                cls = int(box.cls[0])
-                label = model.names[cls] if 0 <= cls < len(model.names) else str(cls)
+                
+                is_inside = False
+                if scaled_zone_points:
+                    is_inside = is_inside_zone((x1, y1, x2, y2), scaled_zone_points, min_overlap_ratio=0.2)
+                
+                # Scale the bounding box back to the original frame size
+                ox1 = int(x1 * (frame.shape[1] / resize_for_det[0]))
+                oy1 = int(y1 * (frame.shape[0] / resize_for_det[1]))
+                ox2 = int(x2 * (frame.shape[1] / resize_for_det[0]))
+                oy2 = int(y2 * (frame.shape[0] / resize_for_det[1]))
 
-                if label == "person" and conf > 0.5:
-                    is_inside = False
-                    if scaled_zone_points:
-                        is_inside = is_inside_zone((x1, y1, x2, y2), scaled_zone_points)
-                    
-                    if is_inside:
-                        count += 1
-                        status_text = "Orang ada di tempat"
-                        
-                        ox1 = int(x1 * (frame.shape[1] / resize_for_det[0]))
-                        oy1 = int(y1 * (frame.shape[0] / resize_for_det[1]))
-                        ox2 = int(x2 * (frame.shape[1] / resize_for_det[0]))
-                        oy2 = int(y2 * (frame.shape[0] / resize_for_det[1]))
+                if is_inside:
+                    count += 1
+                    status_text = "Orang ada di tempat"
+                    color = (0, 255, 0)
+                    text = "IN"
+                else:
+                    color = (0, 0, 255)
+                    text = "OUT"
 
-                        cv2.rectangle(annotated, (ox1, oy1), (ox2, oy2), (0, 255, 0), 2)
-                        cv2.putText(annotated, "IN", (ox1, oy1 - 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    
-        # Teks yang akan ditampilkan
+                cv2.rectangle(annotated, (ox1, oy1), (ox2, oy2), color, 2)
+                cv2.putText(annotated, f"{text} ({conf:.2f})", (ox1, oy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
         display_text = f"Status: {status_text}, Count: {count}"
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 2.0
-        thickness = 4
-        margin = 20 
+        font_scale = 3.0
+        thickness = 5
+        margin = 20
         (text_width, text_height), baseline = cv2.getTextSize(display_text, font, font_scale, thickness)
         x = frame.shape[1] - text_width - margin
         y = margin + text_height
@@ -413,7 +433,6 @@ def process_detection(frame, cam_id: int, resize_for_det=(1280, 720)):
             annotated, display_text, (x, y),
             font, font_scale, (255, 0, 0), thickness
         )
-
         return annotated, count, status_text
     except Exception as e:
         app.logger.error(f"Error process_detection camera {cam_id}: {str(e)}")
@@ -428,7 +447,7 @@ def detect_and_record_thread_fn(cam_id: int):
         if frame is None:
             time.sleep(0.05)
             continue
-        annotated, current_count, status = process_detection(frame, cam_id, resize_for_det=DETECTION_SIZE)
+        annotated, current_count, status = process_detection(frame, cam_id)
         with frames_lock:
             annotated_frame[cam_id] = annotated
             people_count[cam_id] = current_count
@@ -529,12 +548,14 @@ def index():
         people_count=people_count,
         recent_events=events,
     )
+
 @app.route("/video_feed/<int:camera_id>")
 def video_feed(camera_id: int):
     return Response(
         generate_stream(camera_id),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
 @app.route("/person_count/<int:camera_id>")
 def person_count_route(camera_id: int):
     return jsonify({"count": int(people_count.get(camera_id, 0))})
@@ -689,6 +710,60 @@ def add_camera():
         return redirect(url_for("index"))
 
     return render_template("add_camera.html")
+
+@app.route("/edit_zone/<int:camera_id>")
+def edit_zone(camera_id):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, name, zone FROM cctv WHERE id = %s", (camera_id,))
+    camera = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not camera:
+        flash("Camera not found.", "error")
+        return redirect(url_for("index"))
+
+    zone_data = camera.get("zone")
+    parsed_zone = []
+    if zone_data:
+        try:
+            parsed_zone = json.loads(zone_data)
+        except (json.JSONDecodeError, TypeError):
+            parsed_zone = []
+
+    return render_template("edit_zone.html", camera=camera, current_zone=parsed_zone)
+
+# Endpoint baru untuk menyimpan zona ke DB
+@app.route("/set_zone/<int:camera_id>", methods=["POST"])
+def set_zone(camera_id):
+    zone_data = request.form.get("zone_coordinates")
+    if not zone_data:
+        flash("No zone data received.", "error")
+        return redirect(url_for("edit_zone", camera_id=camera_id))
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE cctv SET zone = %s WHERE id = %s",
+            (zone_data, camera_id)
+        )
+        conn.commit()
+        flash("Zone saved successfully!", "success")
+        
+        # Muat ulang konfigurasi zona untuk thread deteksi
+        start_camera_threads() 
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Error saving zone for camera {camera_id}: {str(e)}")
+        flash(f"Error saving zone: {str(e)}", "error")
+    finally:
+        cursor.close()
+        conn.close()
+    
+    return redirect(url_for("index"))
 
 # -------------------- Main --------------------
 if __name__ == "__main__":
