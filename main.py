@@ -3,7 +3,7 @@ import time
 import threading
 from typing import Tuple, List, Dict, Any
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import cv2
 import json
 import ast
@@ -21,18 +21,25 @@ from flask import (
 )
 
 from ultralytics import YOLO
-from database import load_cameras_from_db, get_connection
+from database import (
+    load_cameras_from_db,
+    get_connection,
+    save_person_session_start,
+    update_person_session_end,
+    get_person_sessions,
+    export_sessions_to_excel,
+)
 
 MODEL_PATH = os.environ.get("YOLO_MODEL", "yolov8n.pt")
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", "recordings")
 os.makedirs(RECORDINGS_DIR, exist_ok=True)
 DETECTION_SIZE = (960, 540)
 TARGET_RECORD_FPS = float(os.environ.get("TARGET_RECORD_FPS", "25.0"))
-SLOW_FACTOR = float(os.environ.get("SLOW_FACTOR", "1.25"))
+SLOW_FACTOR = float(os.environ.get("SLOW_FACTOR", "4.00"))
 RTSP_OPEN_RETRY_SECONDS = float(os.environ.get("RTSP_RETRY", "2.0"))
 EXPORTS_DIR = os.environ.get("EXPORTS_DIR", "exports")
 os.makedirs(EXPORTS_DIR, exist_ok=True)
-
+MIN_SESSION_DURATION = 10 
 DEBUG_DRAW_ALL = True
 
 app = Flask(__name__)
@@ -50,14 +57,9 @@ recording_locks: Dict[int, threading.Lock] = {}
 writers: Dict[int, cv2.VideoWriter] = {}
 writer_info: Dict[int, Dict[str, Any]] = {}
 recording_status: Dict[int, bool] = {}
-last_people_count: Dict[int, int] = {}
 last_write_time: Dict[int, float] = {}
 CAM_ZONES: Dict[int, List[Tuple[int, int]]] = {}
-
-# ZONES_FALLBACK dihapus
-# ZONES_FALLBACK = {
-#     1: [[719, 40], [1339, 49], [1331, 629], [639, 653]]
-# }
+active_sessions: Dict[int, Dict[int, datetime]] = {}
 
 try:
     model = YOLO(MODEL_PATH)
@@ -65,38 +67,31 @@ except Exception as e:
     app.logger.error(f"Gagal load YOLO model di {MODEL_PATH}: {e}")
     model = None
 
+#inisiasi penentuan zona 
 def is_inside_zone(bbox, zone_points, min_overlap_ratio=0.2): 
     bx1, by1, bx2, by2 = bbox
     bbox_area = (bx2 - bx1) * (by2 - by1)
     if bbox_area <= 0:
         return False
-    
-    # Check if bbox coordinates are valid for image dimensions
     if bx1 > DETECTION_SIZE[0] or by1 > DETECTION_SIZE[1] or bx2 < 0 or by2 < 0:
         return False
-    
     pts = np.array(zone_points, np.int32)
     poly_mask = np.zeros(DETECTION_SIZE[::-1], dtype=np.uint8)
     cv2.fillPoly(poly_mask, [pts], 255)
-    
     bbox_mask = np.zeros_like(poly_mask)
-    # Ensure bbox coordinates are within image bounds before creating mask
     x_min = max(0, int(bx1))
     y_min = max(0, int(by1))
     x_max = min(DETECTION_SIZE[0], int(bx2))
     y_max = min(DETECTION_SIZE[1], int(by2))
     
     cv2.rectangle(bbox_mask, (x_min, y_min), (x_max, y_max), 255, -1)
-    
     intersection_mask = cv2.bitwise_and(poly_mask, bbox_mask)
     intersection_area = np.sum(intersection_mask > 0)
-    
-    # Use max(1, bbox_area) to prevent division by zero
     overlap_ratio = intersection_area / max(1, bbox_area)
     return overlap_ratio >= min_overlap_ratio
 
+#ini ngecek apakah database dan kolom itu sudah sesuai
 def ensure_schema() -> None:
-    """Pastikan semua tabel inti tersedia."""
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -113,12 +108,13 @@ def ensure_schema() -> None:
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS person_exit (
+            CREATE TABLE IF NOT EXISTS person_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 camera_id INT NOT NULL,
-                exit_time DATETIME NOT NULL,
-                description VARCHAR(255),
-                INDEX (camera_id),
+                tracking_id INT NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME NULL,
+                duration INT NULL,
                 FOREIGN KEY (camera_id) REFERENCES cctv(id) ON DELETE CASCADE
             )
             """
@@ -145,93 +141,7 @@ def ensure_schema() -> None:
         except Exception:
             pass
 
-def save_event(cam_id: int, description: str):
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO person_exit (camera_id, exit_time, description) VALUES (%s, %s, %s)",
-            (cam_id, datetime.now(), description)
-        )
-        conn.commit()
-    except Exception as e:
-        app.logger.error(f"Gagal simpan event ke DB: {e}")
-    finally:
-        try:
-            cur.close()
-            conn.close()
-        except Exception:
-            pass
-
-def save_people_count(cam_id: int, count: int):
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO people_detection (camera_id, count, timestamp) VALUES (%s, %s, %s)",
-            (cam_id, int(count), datetime.now()),
-        )
-        conn.commit()
-    except Exception as e:
-        app.logger.error(f"Gagal simpan people_detection: {e}")
-    finally:
-        try:
-            cur.close()
-            conn.close()
-        except Exception:
-            pass
-
-def get_recent_events(limit: int = 15) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    try:
-        conn = get_connection()
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT pe.id, pe.camera_id, pe.exit_time, pe.description,
-                   COALESCE(c.name, CONCAT('Camera ', pe.camera_id)) AS camera_name
-            FROM person_exit pe
-            LEFT JOIN cctv c ON c.id = pe.camera_id
-            ORDER BY pe.exit_time DESC
-            LIMIT %s
-            """,
-            (int(limit),),
-        )
-        rows = cur.fetchall() or []
-    except Exception as e:
-        app.logger.error(f"Gagal get_recent_events: {e}")
-        rows = []
-    finally:
-        try:
-            cur.close()
-            conn.close()
-        except Exception:
-            pass
-    return rows
-
-def export_events_to_excel(filepath: str) -> str:
-    try:
-        import pandas as pd
-    except ImportError:
-        app.logger.error("Pandas tidak tersedia. Silakan install dengan 'pip install pandas openpyxl'.")
-        raise
-    
-    data = get_recent_events(limit=10000)
-    for d in data:
-        ts = d.get("exit_time")
-        if hasattr(ts, "strftime"):
-            d["exit_time"] = ts.strftime("%Y-%m-%d %H:%M:%S")
-    
-    df = pd.DataFrame(data, columns=["id", "camera_id", "camera_name", "exit_time", "description"])
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    
-    try:
-        df.to_excel(filepath, index=False)
-        return filepath
-    except Exception as e:
-        app.logger.error(f"Gagal menulis Excel: {e}")
-        raise
-
+#inisiasi untuk data kamera
 def init_camera_data(cams: List[Dict[str, Any]]) -> None:
     CAM_ZONES.clear()
     for cam in cams:
@@ -244,21 +154,19 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         stop_flags.setdefault(cid, False)
         recording_locks.setdefault(cid, threading.Lock())
         thread_locks.setdefault(cid, threading.Lock())
-        last_people_count.setdefault(cid, 0)
         last_write_time.setdefault(cid, 0.0)
-
 
         zone_points = []
         z = cam.get("zone")
         
-        if isinstance(z, str) and z.strip():  
+        if isinstance(z, str) and z.strip(): 
             try:
                 zone_points = json.loads(z.strip())
             except (json.JSONDecodeError, TypeError) as e:
                 app.logger.warning(f"Zone tidak valid untuk kamera {cid}: '{z}' -> {e}")
                 zone_points = []
         elif isinstance(z, list) and z:
-             zone_points = z
+            zone_points = z
 
         if not zone_points or len(zone_points) < 3:
             app.logger.warning(f"Tidak ada zona valid di DB untuk kamera {cid}. Deteksi akan dihitung di seluruh frame.")
@@ -278,15 +186,16 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         
         CAM_ZONES[cid] = parsed_points
 
+#ini buat nama file video yang tersimpan dengan unik, terus ngatur kalo video yang disimpen itu harus MP4, fps dan menunda video yang disimpan tunggu di klik udah baru bisa kesimpen
 def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
-    """Inisialisasi writer jika belum ada dan status rekam ON."""
     if writers.get(cam_id) is None and frame is not None:
         size = (frame.shape[1], frame.shape[0])
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         filename = os.path.join(
             RECORDINGS_DIR, f"cam{cam_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
         )
-        vw = cv2.VideoWriter(filename, fourcc, fps, size)
+        fps_writer = fps / SLOW_FACTOR
+        vw = cv2.VideoWriter(filename, fourcc, fps_writer, size)
         if not vw or not vw.isOpened():
             app.logger.error(f"VideoWriter gagal dibuka untuk kamera {cam_id}")
             writers[cam_id] = None
@@ -296,7 +205,8 @@ def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
             app.logger.info(
                 f"Rekaman mulai kamera {cam_id} ke {filename} (fps={fps:.2f}, size={size})"
             )
-            
+
+#ini untuk menutup video yang misalnya udah di klik button selesai
 def close_writer(cam_id: int):
     w = writers.get(cam_id)
     if w is not None:
@@ -312,6 +222,7 @@ def close_writer(cam_id: int):
         writer_info[cam_id] = info
     last_write_time[cam_id] = 0.0
 
+#biar frame atau bounding box ikut terekam
 def capture_thread_fn(cam_id: int, rtsp_url: str):
     cap = None
     backoff = RTSP_OPEN_RETRY_SECONDS
@@ -357,15 +268,18 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
                 pass
         app.logger.info(f"Capture thread stopped for camera {cam_id}")
 
+#ini buat bounding box ini juga bawaan dari Machine Learning nya ehehe
 def process_detection(frame, cam_id: int):
+    global active_sessions
     try:
         if frame is None or model is None:
             return frame, 0, "Unknown"
         resize_for_det = DETECTION_SIZE
         small = cv2.resize(frame, resize_for_det)
         
-        results = model.predict(
+        results = model.track(
             small,
+            persist=True,
             classes=[0],
             verbose=False,
             conf=0.25,
@@ -386,39 +300,83 @@ def process_detection(frame, cam_id: int):
             scaled_zone_points = [[int(x * scale_x), int(y * scale_y)] for x, y in zone_points]
             zone_np = np.array(zone_points, np.int32)
             cv2.polylines(annotated, [zone_np], isClosed=True, color=(255, 255, 0), thickness=2)
-        
-        # Check if there are any people detected
         if any(len(r.boxes) > 0 for r in results):
             status_text = "Orang terdeteksi"
 
+        current_ids = set()
+        if cam_id not in active_sessions:
+            active_sessions[cam_id] = {}
         for r in results:
-            if not hasattr(r, "boxes") or r.boxes is None:
+            if not hasattr(r, "boxes") or not hasattr(r.boxes, 'id') or r.boxes is None:
                 continue
             for box in r.boxes:
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
-                conf = float(box.conf[0])
                 
+                tracking_id = int(box.id[0]) if box.id is not None else -1
+                if tracking_id == -1:
+                    continue
                 is_inside = False
                 if scaled_zone_points:
                     is_inside = is_inside_zone((x1, y1, x2, y2), scaled_zone_points, min_overlap_ratio=0.2)
                 
-                # Scale the bounding box back to the original frame size
+                if is_inside:
+                    current_ids.add(tracking_id)
+
+        # Sesi yang baru terdeteksi di dalam zona, tapi belum ada di active_sessions
+        newly_entered_ids = current_ids - set(active_sessions[cam_id].keys())
+        for tid in newly_entered_ids:
+            save_person_session_start(cam_id, tid)
+            active_sessions[cam_id][tid] = datetime.now()
+            app.logger.info(f"Sesi baru dimulai: cam_id={cam_id}, tracking_id={tid}")
+
+        # Sesi yang keluar dari zona
+        exited_ids = set(active_sessions[cam_id].keys()) - current_ids
+        ids_to_remove = set()
+        for tid in exited_ids:
+            start_time = active_sessions[cam_id].get(tid)
+            if start_time:
+                duration = (datetime.now() - start_time).total_seconds()
+                if duration >= MIN_SESSION_DURATION:
+                    update_person_session_end(cam_id, tid, int(duration))
+                    app.logger.info(f"Sesi selesai: cam_id={cam_id}, tracking_id={tid}, duration={duration:.2f}s")
+                else:
+                    delete_person_session_by_id(cam_id, tid) 
+                    app.logger.info(f"Sesi dibatalkan (terlalu pendek): cam_id={cam_id}, tracking_id={tid}")
+                ids_to_remove.add(tid)
+        for tid in ids_to_remove:
+            active_sessions[cam_id].pop(tid, None)
+
+        # Logika visualisasi untuk frame
+        in_zone_ids = set()
+        for r in results:
+            if not hasattr(r, "boxes") or not hasattr(r.boxes, 'id') or r.boxes is None:
+                continue
+            for box in r.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = float(box.conf[0])
+                tracking_id = int(box.id[0]) if box.id is not None else -1
+                if tracking_id == -1:
+                    continue
+                
+                is_inside = is_inside_zone((x1, y1, x2, y2), scaled_zone_points, min_overlap_ratio=0.2) if scaled_zone_points else False
+                
                 ox1 = int(x1 * (frame.shape[1] / resize_for_det[0]))
                 oy1 = int(y1 * (frame.shape[0] / resize_for_det[1]))
                 ox2 = int(x2 * (frame.shape[1] / resize_for_det[0]))
                 oy2 = int(y2 * (frame.shape[0] / resize_for_det[1]))
 
-                if is_inside:
+                if tracking_id in active_sessions[cam_id] and is_inside:
+                    color = (0, 255, 0) # Hijau untuk orang yang sedang dalam sesi
+                    text = f"IN | ID:{tracking_id}"
+                    in_zone_ids.add(tracking_id)
                     count += 1
-                    status_text = "Orang ada di tempat"
-                    color = (0, 255, 0)
-                    text = "IN"
                 else:
-                    color = (0, 0, 255)
-                    text = "OUT"
+                    color = (0, 0, 255) # Merah untuk orang yang di luar
+                    text = f"OUT | ID:{tracking_id}"
 
                 cv2.rectangle(annotated, (ox1, oy1), (ox2, oy2), color, 2)
                 cv2.putText(annotated, f"{text} ({conf:.2f})", (ox1, oy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        status_text = "Orang ada di tempat" if count > 0 else "Kosong"
         
         display_text = f"Status: {status_text}, Count: {count}"
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -428,7 +386,6 @@ def process_detection(frame, cam_id: int):
         (text_width, text_height), baseline = cv2.getTextSize(display_text, font, font_scale, thickness)
         x = frame.shape[1] - text_width - margin
         y = margin + text_height
-
         cv2.putText(
             annotated, display_text, (x, y),
             font, font_scale, (255, 0, 0), thickness
@@ -438,6 +395,7 @@ def process_detection(frame, cam_id: int):
         app.logger.error(f"Error process_detection camera {cam_id}: {str(e)}")
         return frame, 0, "Error"
 
+#memantau frame
 def detect_and_record_thread_fn(cam_id: int):
     app.logger.info(f"Starting detection thread for camera {cam_id}")
     while not stop_flags.get(cam_id, False):
@@ -451,13 +409,9 @@ def detect_and_record_thread_fn(cam_id: int):
         with frames_lock:
             annotated_frame[cam_id] = annotated
             people_count[cam_id] = current_count
-        if last_people_count.get(cam_id, 0) > 0 and current_count == 0:
-            save_event(cam_id, "Orang meninggalkan ruangan")
-        elif last_people_count.get(cam_id, 0) == 0 and current_count > 0:
-            save_event(cam_id, "Orang ada di tempat")
-        last_people_count[cam_id] = current_count
+        
         if recording_status.get(cam_id, False):
-            fps = max(1.0, float(writer_info.get(cam_id, {}).get("fps", TARGET_RECORD_FPS)))
+            fps = max(6.0, float(writer_info.get(cam_id, {}).get("fps", TARGET_RECORD_FPS / SLOW_FACTOR)))
             interval = 1.0 / fps
             now = time.time()
             with recording_locks.setdefault(cam_id, threading.Lock()):
@@ -472,6 +426,9 @@ def detect_and_record_thread_fn(cam_id: int):
                         close_writer(cam_id)
         time.sleep(0.03)
 
+# jembatan yang mengambil data mentah dari sistem pemrosesan 
+# video dan menyajikannya dalam format yang dapat 
+# dikonsumsi oleh klien (seperti browser web)
 def generate_stream(cam_id: int):
     while not stop_flags.get(cam_id, False):
         frame = annotated_frame.get(cam_id)
@@ -481,7 +438,6 @@ def generate_stream(cam_id: int):
         ret, buffer = cv2.imencode(".jpg", frame)
         if not ret:
             continue
-        
         frame_bytes = buffer.tobytes()
         yield (
             b"--frame\r\n"
@@ -489,6 +445,9 @@ def generate_stream(cam_id: int):
         )
     app.logger.info(f"Streaming for camera {cam_id} stopped.")
 
+# titik awal utama yang memastikan semua proses (penangkapan, analisis, dan perekaman) berjalan 
+# secara simultan dan efisien untuk setiap kamera, memungkinkan seluruh 
+# sistem beroperasi dengan lancar. (manager)
 def start_camera_threads():
     cams = load_cameras_from_db()
     active_cams = [c for c in cams if c.get("is_active", True)]
@@ -518,37 +477,48 @@ def start_camera_threads():
             if cid in detect_threads: del detect_threads[cid]
             
 # -------------------- Routes --------------------
+#digunakan untuk mendefinisikan sebuah URL atau endpoint 
+#pada server web. Ketika pengguna mengakses URL tersebut
 @app.route("/exit_data")
 def exit_data():
     try:
-        conn = get_connection()
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM person_exit ORDER BY exit_time DESC")
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
+        rows = get_person_sessions(limit=100)
         return jsonify(rows)
     except Exception as e:
         app.logger.error(f"/exit_data error: {e}")
         return jsonify([]), 500
 
+# "Ketika seseorang mengunjungi halaman beranda, jalankan fungsi ini."
 @app.route("/")
 def index():
     cams = load_cameras_from_db()
     start_camera_threads()
     try:
-        events = get_recent_events(limit=15)
+        events = get_person_sessions(limit=15)
+        formatted_events = []
+        for e in events:
+            duration_str = str(timedelta(seconds=e['duration'])) if e['duration'] is not None else "Sesi Aktif"
+            end_time_str = e['end_time'].strftime("%Y-%m-%d %H:%M:%S") if e['end_time'] else "Belum ada data sesi"
+
+            formatted_events.append({
+                "camera_name": e['camera_name'],
+                "start_time": e['start_time'].strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end_time_str,
+                "duration": duration_str,
+            })
     except Exception as e:
         app.logger.error(f"Gagal ambil recent events: {e}")
-        events = []
+        formatted_events = []
+    
     return render_template(
         "index.html",
         cameras=cams,
         recording_status=recording_status,
         people_count=people_count,
-        recent_events=events,
+        recent_events=formatted_events,
     )
 
+#ini untuk stream 
 @app.route("/video_feed/<int:camera_id>")
 def video_feed(camera_id: int):
     return Response(
@@ -556,20 +526,23 @@ def video_feed(camera_id: int):
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+#ini untuk jumlah orang
 @app.route("/person_count/<int:camera_id>")
 def person_count_route(camera_id: int):
     return jsonify({"count": int(people_count.get(camera_id, 0))})
 
+#biar bisa export ke excel
 @app.route("/download_events")
 def download_events():
     try:
-        export_path = os.path.join(EXPORTS_DIR, "events.xlsx")
-        export_events_to_excel(export_path)
+        export_path = os.path.join(EXPORTS_DIR, "sessions.xlsx")
+        export_sessions_to_excel(export_path)
         return send_file(export_path, as_attachment=True)
     except Exception as e:
-        app.logger.error(f"Gagal download events: {e}")
-        return "Gagal download events", 500
+        app.logger.error(f"Gagal download sessions: {e}")
+        return "Gagal download sessions", 500
 
+#membuat endpoint API yang dapat memulai atau menghentikan perekaman video
 @app.route("/toggle_record/<int:camera_id>", methods=["POST"])
 def toggle_record(camera_id: int):
     recording_locks.setdefault(camera_id, threading.Lock())
@@ -583,6 +556,7 @@ def toggle_record(camera_id: int):
 
     return redirect(url_for("index"))
 
+#membuat sebuah endpoint API yang dapat menonaktifkan kamera tertentu secara total.
 @app.route("/deactivate/<int:camera_id>", methods=["POST"])
 def deactivate_route(camera_id: int):
     conn = get_connection()
@@ -605,6 +579,7 @@ def deactivate_route(camera_id: int):
         del detect_threads[camera_id]
     return redirect(url_for("index"))
 
+#endpoint API yang dapat mengaktifkan kembali kamera yang sebelumnya dinonaktifkan.
 @app.route("/activate/<int:camera_id>", methods=["POST"])
 def activate_route(camera_id: int):
     conn = get_connection()
@@ -615,11 +590,11 @@ def activate_route(camera_id: int):
     finally:
         cursor.close()
         conn.close()
-
     stop_flags[camera_id] = False
     start_camera_threads()
     return redirect(url_for("index"))
 
+#membuat endpoint API yang akan menghentikan seluruh thread dan proses yang sedang berjalan 
 @app.route("/shutdown_threads", methods=["POST"])
 def shutdown_threads():
     cams = load_cameras_from_db()
@@ -632,6 +607,7 @@ def shutdown_threads():
     time.sleep(2)
     return "All threads stopped", 200
 
+#jalankan perintah ini untuk hapus kamera
 @app.route("/delete_camera/<int:camera_id>", methods=["POST"])
 def delete_camera(camera_id: int):
     stop_flags[camera_id] = True
@@ -649,7 +625,6 @@ def delete_camera(camera_id: int):
     finally:
         cursor.close()
         conn.close()
-
     if camera_id in capture_threads:
         del capture_threads[camera_id]
     if camera_id in detect_threads:
@@ -661,18 +636,23 @@ def delete_camera(camera_id: int):
 @app.route("/events_json")
 def events_json():
     try:
-        events = get_recent_events(limit=50)
+        events = get_person_sessions(limit=50)
         out = []
         for e in events:
-            et = e.get("exit_time")
-            if hasattr(et, "strftime"):
-                et = et.strftime("%Y-%m-%d %H:%M:%S")
+            start_time = e.get("start_time")
+            end_time = e.get("end_time")
+            duration = e.get("duration")
+            start_time_formatted = start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
+            end_time_formatted = end_time.strftime("%Y-%m-%d %H:%M:%S") if end_time else "Belum ada data sesi"
+            duration_formatted = str(timedelta(seconds=duration)) if duration is not None else "Sesi Aktif"
+
             out.append({
                 "id": e.get("id"),
                 "camera_id": e.get("camera_id"),
                 "camera_name": e.get("camera_name"),
-                "exit_time": et,
-                "description": e.get("description"),
+                "start_time": start_time_formatted,
+                "end_time": end_time_formatted,
+                "duration": duration_formatted,
             })
         return jsonify(out)
     except Exception as e:
@@ -684,11 +664,9 @@ def add_camera():
     if request.method == "POST":
         name = request.form.get("name")
         rtsp_url = request.form.get("rtsp_url")
-
         if not name or not rtsp_url:
             flash("Camera name and RTSP URL are required.", "error")
             return redirect(url_for("add_camera"))
-
         conn = get_connection()
         cursor = conn.cursor()
         try:
@@ -705,10 +683,8 @@ def add_camera():
         finally:
             cursor.close()
             conn.close()
-
         start_camera_threads()
         return redirect(url_for("index"))
-
     return render_template("add_camera.html")
 
 @app.route("/edit_zone/<int:camera_id>")
@@ -719,11 +695,9 @@ def edit_zone(camera_id):
     camera = cursor.fetchone()
     cursor.close()
     conn.close()
-
     if not camera:
         flash("Camera not found.", "error")
         return redirect(url_for("index"))
-
     zone_data = camera.get("zone")
     parsed_zone = []
     if zone_data:
@@ -731,17 +705,14 @@ def edit_zone(camera_id):
             parsed_zone = json.loads(zone_data)
         except (json.JSONDecodeError, TypeError):
             parsed_zone = []
-
     return render_template("edit_zone.html", camera=camera, current_zone=parsed_zone)
 
-# Endpoint baru untuk menyimpan zona ke DB
 @app.route("/set_zone/<int:camera_id>", methods=["POST"])
 def set_zone(camera_id):
     zone_data = request.form.get("zone_coordinates")
     if not zone_data:
         flash("No zone data received.", "error")
         return redirect(url_for("edit_zone", camera_id=camera_id))
-    
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -751,10 +722,7 @@ def set_zone(camera_id):
         )
         conn.commit()
         flash("Zone saved successfully!", "success")
-        
-        # Muat ulang konfigurasi zona untuk thread deteksi
         start_camera_threads() 
-
     except Exception as e:
         conn.rollback()
         app.logger.error(f"Error saving zone for camera {camera_id}: {str(e)}")
@@ -762,10 +730,8 @@ def set_zone(camera_id):
     finally:
         cursor.close()
         conn.close()
-    
     return redirect(url_for("index"))
 
-# -------------------- Main --------------------
 if __name__ == "__main__":
     start_camera_threads()
     app.run(host="0.0.0.0", port=5000, threaded=True, use_reloader=False)

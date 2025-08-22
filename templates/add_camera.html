@@ -4,88 +4,148 @@
     <meta charset="UTF-8" />
     <title>Add New Camera</title>
     <style>
+        /* Paste the new CSS code here */
         body {
-            font-family: Arial, sans-serif;
-            margin: 40px auto;
-            max-width: 500px;
-            background: #f9f9f9;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #eef2f5;
+            color: #444;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
         }
+
+        .form-container {
+            background: #ffffff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            width: 100%;
+            max-width: 480px;
+            box-sizing: border-box;
+        }
+
         h1 {
             text-align: center;
+            color: #2c3e50;
             margin-bottom: 30px;
+            font-weight: 600;
+            font-size: 1.8rem;
         }
+
         label {
             display: block;
             margin-bottom: 8px;
-            font-weight: bold;
+            font-weight: 500;
+            color: #555;
+            font-size: 0.9rem;
         }
+
         input[type="text"], input[type="url"] {
             width: 100%;
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
+            padding: 12px;
+            margin-bottom: 25px;
+            border: 1px solid #dcdfe6;
+            border-radius: 8px;
             font-size: 1rem;
+            color: #333;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
             box-sizing: border-box;
         }
+
+        input[type="text"]:focus, input[type="url"]:focus {
+            border-color: #4a90e2;
+            box-shadow: 0 0 8px rgba(74, 144, 226, 0.2);
+            outline: none;
+        }
+
         button {
-            background-color: #007bff;
+            background-color: #4a90e2;
             color: white;
-            padding: 12px 20px;
+            padding: 14px 25px;
             font-size: 1rem;
+            font-weight: bold;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             width: 100%;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            letter-spacing: 0.5px;
         }
+
         button:hover {
-            background-color: #0056b3;
+            background-color: #357abd;
+            transform: translateY(-2px);
         }
+
+        button:active {
+            transform: translateY(0);
+        }
+
         .messages {
             margin-bottom: 20px;
-            font-weight: bold;
-            color: red;
+            font-weight: 600;
             text-align: center;
+            padding: 10px;
+            border-radius: 6px;
         }
+
+        .messages p {
+            margin: 0;
+        }
+
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+
         a.back-link {
             display: block;
-            margin-top: 15px;
+            margin-top: 25px;
             text-align: center;
-            color: #007bff;
+            color: #4a90e2;
             text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s ease;
         }
+
         a.back-link:hover {
+            color: #357abd;
             text-decoration: underline;
         }
     </style>
 </head>
 <body>
-    <h1>Add New Camera</h1>
+    <div class="form-container">
+        <h1>Add New Camera</h1>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="messages">
-          {% for category, message in messages %}
-            <p class="{{ category }}">{{ message }}</p>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="messages">
+              {% for category, message in messages %}
+                <p class="{{ category }}">{{ message }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
 
-    <form method="post" action="{{ url_for('add_camera') }}">
-        <label for="name">Camera Name</label>
-        <input type="text" id="name" name="name" placeholder="Enter camera name" required />
+        <form method="post" action="{{ url_for('add_camera') }}">
+            <label for="name">Camera Name</label>
+            <input type="text" id="name" name="name" placeholder="Enter camera name" required />
 
-        <label for="rtsp_url">RTSP URL</label>
-        <input type="url" id="rtsp_url" name="rtsp_url" placeholder="rtsp://example.com/stream" required />
+            <label for="rtsp_url">RTSP URL</label>
+            <input type="url" id="rtsp_url" name="rtsp_url" placeholder="rtsp://example.com/stream" required />
 
-        <button type="submit">Add Camera</button>
-    </form>
+            <button type="submit">Add Camera</button>
+        </form>
 
-    <a href="{{ url_for('index') }}" class="back-link">Back to Monitoring</a>
+        <a href="{{ url_for('index') }}" class="back-link">Back to Monitoring</a>
+    </div>
 </body>
 </html>

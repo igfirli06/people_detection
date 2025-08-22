@@ -41,101 +41,123 @@ footer a:hover { text-decoration:underline; }
 // ===== DATA CAMERAS DARI FLASK JADI JS =====
 const cameras = {{ cameras|tojson }};
 
-// ===== UPDATE PEOPLE COUNT =====
+// ===== UPDATE PEOPLE COUNT (tidak berubah) =====
 function updatePeopleCount(cameraId) {
-fetch(`/person_count/${cameraId}`)
-.then(res => res.json())
-.then(data => {
-document.getElementById(`people-count-${cameraId}`).innerText = data.count;
-})
-     .catch(err => console.error("Error updating people count:", err));
+    fetch(`/person_count/${cameraId}`)
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById(`people-count-${cameraId}`).innerText = data.count;
+        })
+        .catch(err => console.error("Error updating people count:", err));
 }
 
-// ===== START INTERVAL UNTUK SEMUA CAMERAS =====
-function startUpdatingCounts() {
-     cameras.forEach(cam => {
-         setInterval(() => updatePeopleCount(cam.id), 2000);
-     });
+// ===== UPDATE TABEL RIWAYAT SESI BARU =====
+function updateEventLog() {
+    fetch("/events_json")
+        .then(res => res.json())
+        .then(data => {
+            const tableBody = document.getElementById("events-body");
+            tableBody.innerHTML = ""; // Bersihkan tabel
+
+            if (data.length === 0) {
+                const noDataRow = `<tr><td colspan="4" style="text-align:center; color:#888;">Belum ada data sesi</td></tr>`;
+                tableBody.innerHTML = noDataRow;
+            } else {
+                data.forEach(event => {
+                    const row = document.createElement("tr");
+                    const durationText = event.duration ? event.duration : 'Masih dalam zona';
+                    row.innerHTML = `
+                        <td>${event.camera_name}</td>
+                        <td>${event.start_time}</td>
+                        <td>${event.end_time ? event.end_time : '-'}</td>
+                        <td>${durationText}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+        })
+        .catch(err => console.error("Error updating event log:", err));
+}
+
+// ===== START INTERVAL UNTUK SEMUA CAMERAS DAN LOG =====
+function startUpdatingAll() {
+    cameras.forEach(cam => {
+        setInterval(() => updatePeopleCount(cam.id), 2000);
+    });
+    // Update log setiap 5 detik
+    setInterval(updateEventLog, 5000);
+    // Jalankan pertama kali saat load
+    updateEventLog();
 }
 
 // ===== JALANKAN SAAT HALAMAN LOAD =====
-window.onload = startUpdatingCounts;
+window.onload = startUpdatingAll;
 </script>
 
 </head>
 <body>
 
 <header>
-     <img src="{{ url_for('static', filename='ktilogo.webp') }}" alt="KTI Logo">
-     <div>
+    <img src="{{ url_for('static', filename='ktilogo.webp') }}" alt="KTI Logo">
+    <div>
         <h1>Kutai Timber</h1>
-             <p>Indonesia</p>
-     </div>
+        <p>Indonesia</p>
+    </div>
 </header>
 
 <div class="add-camera-link">
-     <a href="{{ url_for('add_camera') }}">tambah kamera</a>
+    <a href="{{ url_for('add_camera') }}">tambah kamera</a>
 </div>
 
 <div class="cameras-wrapper">
-     {% for cam in cameras %}
-     <div class="camera-container" data-cam-id="{{ cam.id }}">
-         <h2>{{ cam.name }}</h2>
-         <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
-             <div class="controls">
+    {% for cam in cameras %}
+    <div class="camera-container" data-cam-id="{{ cam.id }}">
+        <h2>{{ cam.name }}</h2>
+        <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
+        <div class="controls">
             <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
-             <button type="submit" class="btn btn-start">
-                 {% if recording_status.get(cam.id) %} stop recording {% else %} start recording {% endif %}
-                 </button>
-             </form>
-             <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Delete this camera?');">
-             <button type="submit" class="btn btn-delete">Delete Camera</button>
-             </form>
-             </div>
-             <div class="controls">
-    <a href="{{ url_for('edit_zone', camera_id=cam.id) }}" class="btn btn-start">Edit Zona</a>
-</div>
-         </div>
-          {% else %}
-           <p style="text-align:center; font-size:1.2rem; color:#666;">No cameras available.</p>
-     {% endfor %}
+                <button type="submit" class="btn btn-start">
+                    {% if recording_status.get(cam.id) %} stop recording {% else %} start recording {% endif %}
+                </button>
+            </form>
+            <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Delete this camera?');">
+                <button type="submit" class="btn btn-delete">Delete Camera</button>
+            </form>
+        </div>
+        <div class="controls">
+            <a href="{{ url_for('edit_zone', camera_id=cam.id) }}" class="btn btn-start">Edit Zona</a>
+        </div>
+    </div>
+    {% else %}
+    <p style="text-align:center; font-size:1.2rem; color:#666;">No cameras available.</p>
+    {% endfor %}
 </div>
 
 <div class="log-wrapper">
-    <h2>Log Orang Keluar</h2>
-     <table>
-         <thead>
-             <tr>
-                 <th>Kamera</th>
-                 <th>Waktu Keluar</th>
-                 <th>Keterangan</th>
-             </tr>
-         </thead>
-     <tbody id="events-body">
-         {% for event in recent_events %}
-         <tr>
-             <td>{{ event.camera_name }}</td>
-             <td>{{ event.exit_time.strftime('%Y-%m-%d %H:%M:%S') if event.exit_time else '' }}</td>
-             <td>{{ event.description }}</td>
-         </tr>
-         {% else %}
-         <tr>
-             <td colspan="3" style="text-align:center; color:#888;">Belum ada data keluar</td>
-         </tr>
-         {% endfor %}
-     </tbody>
-     </table>
+    <h2>Riwayat Sesi</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Kamera</th>
+                <th>Waktu Masuk</th>
+                <th>Waktu Keluar</th>
+                <th>Durasi</th>
+            </tr>
+        </thead>
+        <tbody id="events-body">
+            </tbody>
+    </table>
     <a href="{{ url_for('download_events') }}">Download Excel</a>
 </div>
 
 <footer>
-     <p>tidak ada kata tak mungkin semuanya hanya butuh device yang layak</p>
-     <p>igfirliiaziiza@gmail.com</p>
-     <p>
+    <p>tidak ada kata tak mungkin semuanya hanya butuh device yang layak</p>
+    <p>igfirliiaziiza@gmail.com</p>
+    <p>
         <a href="#"><i class="fab fa-instagram"></i></a>
         <a href="#"><i class="fab fa-twitter"></i></a>
-        </p>
-     <p>Copyright © 2025 All for PT. Kutai Timber Indonesia</p>
+    </p>
+    <p>Copyright © 2025 All for PT. Kutai Timber Indonesia</p>
 </footer>
 
 </body>

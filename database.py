@@ -1,15 +1,14 @@
 import mysql.connector
 from datetime import datetime
 import pandas as pd
-import json   # WAJIB buat load zona
-
+import json
+from typing import List, Dict, Any
 
 def get_connection():
-    """Buat koneksi ke database MySQL"""
     return mysql.connector.connect(
         host="localhost",
-        user="root",          # sesuaikan
-        password="",          # sesuaikan
+        user="root",
+        password="",
         database="people_detection"
     )
 
@@ -19,7 +18,7 @@ def load_cameras_from_db():
     cursor.execute("SELECT * FROM cctv")
     rows = cursor.fetchall()
     conn.close()
-
+    
     cameras = []
     for row in rows:
         zone = []
@@ -37,32 +36,45 @@ def load_cameras_from_db():
         })
     return cameras
 
-def save_event(camera_id, description):
-    """Simpan event orang keluar ke tabel person_exit"""
+def save_person_session_start(camera_id, tracking_id):
     conn = get_connection()
     cursor = conn.cursor()
     try:
         now = datetime.now()
         cursor.execute("""
-            INSERT INTO person_exit (camera_id, exit_time, description)
+            INSERT INTO person_sessions (camera_id, tracking_id, start_time)
             VALUES (%s, %s, %s)
-        """, (camera_id, now, description))
+        """, (camera_id, tracking_id, now))
         conn.commit()
     finally:
         cursor.close()
         conn.close()
 
+def update_person_session_end(camera_id, tracking_id, duration):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        now = datetime.now()
+        cursor.execute("""
+            UPDATE person_sessions
+            SET end_time = %s, duration = %s
+            WHERE camera_id = %s AND tracking_id = %s AND end_time IS NULL
+        """, (now, duration, camera_id, tracking_id))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
 
-def get_recent_events(limit=15):
-    """Ambil event terakhir"""
+def get_person_sessions(limit=15):
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute("""
-            SELECT pe.*, c.name AS name
-            FROM person_exit pe
-            JOIN cctv c ON pe.camera_id = c.id
-            ORDER BY pe.exit_time DESC
+            SELECT ps.*, c.name AS name
+            FROM person_sessions ps
+            JOIN cctv c ON ps.camera_id = c.id
+            WHERE ps.end_time IS NOT NULL
+            ORDER BY ps.end_time DESC
             LIMIT %s
         """, (limit,))
         return cursor.fetchall()
@@ -70,16 +82,42 @@ def get_recent_events(limit=15):
         cursor.close()
         conn.close()
 
+def get_person_sessions(limit: int = 20) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        query = """
+        SELECT
+            ps.id,
+            ps.camera_id,
+            ps.tracking_id,
+            ps.start_time,
+            ps.end_time,
+            ps.duration,
+            c.name AS camera_name
+        FROM person_sessions ps
+        JOIN cctv c ON ps.camera_id = c.id
+        ORDER BY ps.start_time DESC
+        LIMIT %s
+        """
+        cursor.execute(query, (limit,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
-def export_events_to_excel(file_path):
-    """Export semua event ke file Excel"""
+def export_sessions_to_excel(file_path):
     conn = get_connection()
     query = """
-        SELECT pe.id, c.name AS name, pe.exit_time, pe.description
-        FROM person_exit pe
-        JOIN cctv c ON pe.camera_id = c.id
-        ORDER BY pe.exit_time DESC
+        SELECT ps.id, c.name AS name, ps.start_time, ps.end_time, ps.duration
+        FROM person_sessions ps
+        JOIN cctv c ON ps.camera_id = c.id
+        WHERE ps.end_time IS NOT NULL
+        ORDER BY ps.end_time DESC
     """
     df = pd.read_sql(query, conn)
     conn.close()
+    df['duration_formatted'] = df['duration'].apply(
+        lambda x: f"{x // 3600:02d}:{(x % 3600) // 60:02d}:{x % 60:02d}"
+    )
     df.to_excel(file_path, index=False)
