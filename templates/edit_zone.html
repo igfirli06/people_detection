@@ -1,182 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>Edit Zona Kamera {{ camera.id }} - {{ camera.name }}</title>
- <style>
-  body {
-   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-   background-color: #f4f4f4;
-   color: #333;
-   margin: 0;
-   padding: 0;
-   display: flex;
-   justify-content: center;
-   align-items: center;
-   min-height: 100vh;
-  }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Zona Kamera {{ camera.id }} - {{ camera.name }}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f4;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
 
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 600px;
+        }
 
-  .container {
-   background-color: #fff;
-   padding: 30px;
-   border-radius: 8px;
-   box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-   text-align: center;
-   width: 90%;
-   max-width: 600px;
-  }
+        h1 {
+            color: #337ab7;
+            margin-bottom: 20px;
+        }
 
+        .image-container {
+            position: relative;
+            width: 100%;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
 
-  h1 {
-   color: #337ab7;
-   margin-bottom: 20px;
-  }
+        .image-container img {
+            width: 100%;
+            display: block;
+        }
 
+        .canvas-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
 
-  .image-container {
-   position: relative;
-   width: 100%;
-   margin-bottom: 15px;
-   border: 1px solid #ddd;
-   border-radius: 4px;
-   overflow: hidden; /* Ensures canvas stays within the border */
-  }
+        #coords-display {
+            margin-top: 15px;
+            font-size: 0.95rem;
+            color: #555;
+        }
 
+        #save-form {
+            margin-top: 25px;
+        }
 
-  .image-container img {
-   width: 100%;
-   display: block;
-  }
+        .btn-save {
+            background-color: #5cb85c;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
 
-
-  .canvas-overlay {
-   position: absolute;
-   top: 0;
-   left: 0;
-   width: 100%;
-   height: 100%;
-   cursor: crosshair;
-  }
-
-
-  #coords-display {
-   margin-top: 15px;
-   font-size: 0.95rem;
-   color: #555;
-  }
-
-
-  #save-form {
-   margin-top: 25px;
-  }
-
-
-  .btn-save {
-   background-color: #5cb85c;
-   color: white;
-   padding: 12px 25px;
-   border: none;
-   border-radius: 6px;
-   cursor: pointer;
-   font-size: 1rem;
-   transition: background-color 0.3s ease;
-  }
-
-
-  .btn-save:hover {
-   background-color: #4cae4c;
-  }
- </style>
+        .btn-save:hover {
+            background-color: #4cae4c;
+        }
+    </style>
 </head>
 <body>
- <div class="container">
-  <h1>Edit Zona untuk {{ camera.name }}</h1>
+    <div class="container">
+        <h1>Edit Zona untuk {{ camera.name }}</h1>
 
+        <div class="image-container">
+            <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
+            <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
+        </div>
 
-  <div class="image-container">
-   <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
-   <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
-  </div>
+        <div id="coords-display">
+            Koordinat: <span id="coordinates">{% if current_zone %}{{ current_zone|tojson }}{% else %}[]{% endif %}</span>
+        </div>
 
+        <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}">
+            <input type="hidden" name="zone_coordinates" id="zone-input" value="{{ current_zone|tojson }}">
+            <button type="submit" class="btn-save">Simpan Zona</button>
+        </form>
+    </div>
 
-  <div id="coords-display">
-   Koordinat: <span id="coordinates">{% if current_zone %}{{ current_zone|tojson }}{% else %}[]{% endif %}</span>
-  </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('drawing-canvas');
+            const videoFeed = document.getElementById('video-feed');
+            const coordsDisplay = document.getElementById('coordinates');
+            const zoneInput = document.getElementById('zone-input');
 
+            const ctx = canvas.getContext('2d');
+            let points = [];
+coordsDisplay.textContent = JSON.stringify(points);
+zoneInput.value = JSON.stringify(points);
 
-  <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}">
-   <input type="hidden" name="zone_coordinates" id="zone-input" value="{{ current_zone|tojson }}">
-   <button type="submit" class="btn-save">Simpan Zona</button>
-  </form>
- </div>
+            function resizeCanvas() {
+                canvas.width = videoFeed.naturalWidth;
+                canvas.height = videoFeed.naturalHeight;
+                canvas.style.width = videoFeed.offsetWidth + 'px';
+                canvas.style.height = videoFeed.offsetHeight + 'px';
+                redraw();
+            }
 
+            function redraw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (points.length > 1) {
+                    ctx.strokeStyle = '#FFFF00'; 
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.moveTo(points[0][0], points[0][1]);
+                    for (let i = 1; i < points.length; i++) {
+                        ctx.lineTo(points[i][0], points[i][1]);
+                    }
+                    if (points.length > 2) {
+                        ctx.closePath();
+                    }
+                    ctx.stroke();
+                }
+            }
 
- <script>
-  document.addEventListener('DOMContentLoaded', function() {
-   const canvas = document.getElementById('drawing-canvas');
-   const videoFeed = document.getElementById('video-feed');
-   const coordsDisplay = document.getElementById('coordinates');
-   const zoneInput = document.getElementById('zone-input');
-   const container = document.querySelector('.image-container');
+            canvas.addEventListener('click', function(event) {
 
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                const scaledX = Math.round((x / rect.width) * videoFeed.naturalWidth);
+                const scaledY = Math.round((y / rect.height) * videoFeed.naturalHeight);
 
-   const ctx = canvas.getContext('2d');
-   let points = JSON.parse(coordsDisplay.textContent);
+                points.push([scaledX, scaledY]);
+                
+                coordsDisplay.textContent = JSON.stringify(points);
+                zoneInput.value = JSON.stringify(points);
+                
+                redraw();
+            });
 
+            videoFeed.onload = resizeCanvas;
+            window.addEventListener('resize', resizeCanvas);
 
-   function resizeCanvas() {
-    canvas.width = videoFeed.offsetWidth;
-    canvas.height = videoFeed.offsetHeight;
-    redraw();
-   }
-   videoFeed.onload = resizeCanvas;
-   window.addEventListener('resize', resizeCanvas);
-   function redraw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (points.length > 1) {
-     ctx.strokeStyle = '#FFFF00'; 
-     ctx.lineWidth = 2;
-     ctx.beginPath();
-     const scaledPoints = points.map(p => [(p.width ? p.x : p.x) / videoFeed.naturalWidth * canvas.width, (p.height ? p.y : p.y) / videoFeed.naturalHeight * canvas.height]);
-     ctx.moveTo(scaledPoints [0][0], scaledPoints [0][1]);
-     for(let i = 1; i < scaledPoints.length; i++) {
-      ctx.lineTo(scaledPoints [i][0], scaledPoints [i][1]);
-     }
-     if (scaledPoints.length > 2) {
-      ctx.closePath();
-     }
-     ctx.stroke();
-    }
-   }
-   canvas.addEventListener('click', function(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(event.clientX - rect.left);
-    const y = Math.round(event.clientY - rect.top);
-
-
-    const originalWidth = videoFeed.naturalWidth;
-    const originalHeight = videoFeed.naturalHeight;
-    const scaledX = Math.round((x / canvas.width) * originalWidth);
-    const scaledY = Math.round((y / canvas.height) * originalHeight);
-
-
-    points.push({ x: scaledX, y: scaledY });
-
-
-    coordsDisplay.textContent = JSON.stringify(points.map(p => [p.x, p.y]));
-    zoneInput.value = JSON.stringify(points.map(p => [p.x, p.y]));
-
-
-    redraw();
-   });
-   if (points.length > 2) {
-    videoFeed.onload = function() {
-     resizeCanvas();
-    };
-   }
-  });
- </script>
+            if (videoFeed.complete) {
+                resizeCanvas();
+            }
+        });
+    </script>
 </body>
 </html>

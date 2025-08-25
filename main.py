@@ -28,6 +28,8 @@ from database import (
     update_person_session_end,
     get_person_sessions,
     export_sessions_to_excel,
+    delete_person_session_by_id,
+
 )
 
 MODEL_PATH = os.environ.get("YOLO_MODEL", "yolov8n.pt")
@@ -159,16 +161,18 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         zone_points = []
         z = cam.get("zone")
         
-        if isinstance(z, str) and z.strip(): 
+        if isinstance(z, str) and z.strip():
             try:
-                zone_points = json.loads(z.strip())
+                # Mengganti kutip tunggal dengan kutip ganda untuk memastikan format JSON valid
+                zone_points = json.loads(z.replace("'", '"'))
             except (json.JSONDecodeError, TypeError) as e:
                 app.logger.warning(f"Zone tidak valid untuk kamera {cid}: '{z}' -> {e}")
                 zone_points = []
         elif isinstance(z, list) and z:
             zone_points = z
 
-        if not zone_points or len(zone_points) < 3:
+        # Pastikan data yang diproses adalah list dengan setidaknya 3 poin
+        if not isinstance(zone_points, list) or len(zone_points) < 3:
             app.logger.warning(f"Tidak ada zona valid di DB untuk kamera {cid}. Deteksi akan dihitung di seluruh frame.")
             CAM_ZONES[cid] = []
             continue
@@ -176,8 +180,13 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         parsed_points = []
         try:
             for p in zone_points:
+                # Menambahkan validasi yang lebih kuat untuk setiap titik
                 if isinstance(p, (list, tuple)) and len(p) == 2:
-                    parsed_points.append([int(p[0]), int(p[1])])
+                    x, y = p
+                    if x is not None and y is not None:
+                        parsed_points.append([int(x), int(y)])
+                    else:
+                        raise ValueError("Titik zona mengandung nilai 'None'")
                 else:
                     raise ValueError("Format titik zona tidak sesuai.")
         except (ValueError, IndexError) as e:
@@ -187,24 +196,58 @@ def init_camera_data(cams: List[Dict[str, Any]]) -> None:
         CAM_ZONES[cid] = parsed_points
 
 #ini buat nama file video yang tersimpan dengan unik, terus ngatur kalo video yang disimpen itu harus MP4, fps dan menunda video yang disimpan tunggu di klik udah baru bisa kesimpen
-def init_writer_if_needed(cam_id: int, frame, fps=TARGET_RECORD_FPS):
-    if writers.get(cam_id) is None and frame is not None:
-        size = (frame.shape[1], frame.shape[0])
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        filename = os.path.join(
-            RECORDINGS_DIR, f"cam{cam_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-        )
-        fps_writer = fps / SLOW_FACTOR
-        vw = cv2.VideoWriter(filename, fourcc, fps_writer, size)
-        if not vw or not vw.isOpened():
-            app.logger.error(f"VideoWriter gagal dibuka untuk kamera {cam_id}")
-            writers[cam_id] = None
-        else:
-            writers[cam_id] = vw
-            writer_info[cam_id] = {"filename": filename, "fps": fps, "size": size}
-            app.logger.info(
-                f"Rekaman mulai kamera {cam_id} ke {filename} (fps={fps:.2f}, size={size})"
-            )
+#inisiasi untuk data kamera
+def init_camera_data(cams: List[Dict[str, Any]]) -> None:
+    CAM_ZONES.clear()
+    for cam in cams:
+        cid = cam["id"]
+        latest_frame.setdefault(cid, None)
+        annotated_frame.setdefault(cid, None)
+        people_count.setdefault(cid, 0)
+        writer_info.setdefault(cid, {"fps": TARGET_RECORD_FPS, "size": None, "filename": None})
+        recording_status.setdefault(cid, False)
+        stop_flags.setdefault(cid, False)
+        recording_locks.setdefault(cid, threading.Lock())
+        thread_locks.setdefault(cid, threading.Lock())
+        last_write_time.setdefault(cid, 0.0)
+
+        zone_points = []
+        z = cam.get("zone")
+        
+        if isinstance(z, str) and z.strip():
+            try:
+                # Mengganti kutip tunggal dengan kutip ganda untuk memastikan format JSON valid
+                zone_points = json.loads(z.replace("'", '"'))
+            except (json.JSONDecodeError, TypeError) as e:
+                app.logger.warning(f"Zone tidak valid untuk kamera {cid}: '{z}' -> {e}")
+                zone_points = []
+        elif isinstance(z, list) and z:
+            zone_points = z
+
+        # Pastikan data yang diproses adalah list dengan setidaknya 3 poin
+        if not isinstance(zone_points, list) or len(zone_points) < 3:
+            app.logger.warning(f"Tidak ada zona valid di DB untuk kamera {cid}. Deteksi akan dihitung di seluruh frame.")
+            CAM_ZONES[cid] = []
+            continue
+
+        parsed_points = []
+        try:
+            for p in zone_points:
+                # Menambahkan validasi yang lebih kuat untuk setiap titik
+                if isinstance(p, (list, tuple)) and len(p) == 2:
+                    x, y = p
+                    if x is not None and y is not None:
+                        parsed_points.append([int(x), int(y)])
+                    else:
+                        raise ValueError("Titik zona mengandung nilai 'None'")
+                else:
+                    raise ValueError("Format titik zona tidak sesuai.")
+        except (ValueError, IndexError) as e:
+            app.logger.error(f"Gagal memproses titik zona untuk kamera {cid}: {e}")
+            parsed_points = []
+        
+        CAM_ZONES[cid] = parsed_points
+# ... kode lainnya
 
 #ini untuk menutup video yang misalnya udah di klik button selesai
 def close_writer(cam_id: int):
@@ -553,7 +596,6 @@ def toggle_record(camera_id: int):
     if not new_status:
         with recording_locks[camera_id]:
             close_writer(camera_id)
-
     return redirect(url_for("index"))
 
 #membuat sebuah endpoint API yang dapat menonaktifkan kamera tertentu secara total.
@@ -690,29 +732,34 @@ def add_camera():
 @app.route("/edit_zone/<int:camera_id>")
 def edit_zone(camera_id):
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     cursor.execute("SELECT id, name, zone FROM cctv WHERE id = %s", (camera_id,))
-    camera = cursor.fetchone()
+    camera_tuple = cursor.fetchone()
     cursor.close()
     conn.close()
-    if not camera:
-        flash("Camera not found.", "error")
-        return redirect(url_for("index"))
-    zone_data = camera.get("zone")
-    parsed_zone = []
-    if zone_data:
+
+    if not camera_tuple:
+        return "Camera not found", 404
+
+    # Mengonversi tuple menjadi dictionary
+    camera = {
+        "id": camera_tuple[0],
+        "name": camera_tuple[1],
+        "zone": camera_tuple[2]
+    }
+
+    current_zone = camera.get("zone")
+    if current_zone and isinstance(current_zone, str):
         try:
-            parsed_zone = json.loads(zone_data)
+            current_zone = json.loads(current_zone)
         except (json.JSONDecodeError, TypeError):
-            parsed_zone = []
-    return render_template("edit_zone.html", camera=camera, current_zone=parsed_zone)
+            current_zone = []
+    
+    return render_template("edit_zone.html", camera=camera, current_zone=current_zone)
 
 @app.route("/set_zone/<int:camera_id>", methods=["POST"])
 def set_zone(camera_id):
     zone_data = request.form.get("zone_coordinates")
-    if not zone_data:
-        flash("No zone data received.", "error")
-        return redirect(url_for("edit_zone", camera_id=camera_id))
     conn = get_connection()
     cursor = conn.cursor()
     try:

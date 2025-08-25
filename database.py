@@ -65,23 +65,7 @@ def update_person_session_end(camera_id, tracking_id, duration):
         cursor.close()
         conn.close()
 
-def get_person_sessions(limit=15):
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("""
-            SELECT ps.*, c.name AS name
-            FROM person_sessions ps
-            JOIN cctv c ON ps.camera_id = c.id
-            WHERE ps.end_time IS NOT NULL
-            ORDER BY ps.end_time DESC
-            LIMIT %s
-        """, (limit,))
-        return cursor.fetchall()
-    finally:
-        cursor.close()
-        conn.close()
-
+# Gabungkan kedua fungsi get_person_sessions menjadi satu fungsi yang lebih baik
 def get_person_sessions(limit: int = 20) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
@@ -121,3 +105,18 @@ def export_sessions_to_excel(file_path):
         lambda x: f"{x // 3600:02d}:{(x % 3600) // 60:02d}:{x % 60:02d}"
     )
     df.to_excel(file_path, index=False)
+    
+def delete_person_session_by_id(camera_id, tracking_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM person_sessions WHERE camera_id = %s AND tracking_id = %s AND end_time IS NULL",
+            (camera_id, tracking_id)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Failed to delete short session: {e}")
+    finally:
+        cur.close()
+        conn.close()
