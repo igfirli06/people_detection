@@ -139,7 +139,7 @@
         .btn-danger:hover {
             background: linear-gradient(135deg, var(--danger-hover), #A93226);
             transform: translateY(-2px);
-            box-shadow: 6px 12px rgba(231, 76, 60, 0.4);
+            box-shadow: 0 6px 12px rgba(231, 76, 60, 0.4);
         }
     </style>
 </head>
@@ -165,6 +165,8 @@
                 <button type="submit" class="btn btn-danger">Hapus Zona</button>
             </form>
         </div>
+
+        <p><a href="{{ url_for('index') }}" style="color: var(--primary-color); text-decoration: none; font-weight: 600; margin-top: 20px; display: inline-block;">&larr; Kembali ke Halaman Utama</a></p>
     </div>
 
     <script>
@@ -173,6 +175,7 @@
             const videoFeed = document.getElementById('video-feed');
             const coordsDisplay = document.getElementById('coordinates');
             const zoneInput = document.getElementById('zone-input');
+            const saveForm = document.getElementById('save-form');
 
             const ctx = canvas.getContext('2d');
             let points = [];
@@ -231,6 +234,13 @@
                 zoneInput.value = JSON.stringify(points);
                 
                 redraw();
+            });
+
+            saveForm.addEventListener('submit', function(event) {
+                if (points.length < 3) {
+                    event.preventDefault();
+                    alert("Zona harus memiliki minimal 3 titik. Silakan buat zona terlebih dahulu.");
+                }
             });
 
             videoFeed.onload = function() {

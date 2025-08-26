@@ -226,8 +226,7 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
                 app.logger.warning(f"Camera {cam_id} cannot open, retry in {backoff}s...")
                 time.sleep(backoff)
                 backoff = min(backoff * 1.5, 30.0)
-                continue
-            
+                continue 
             try:
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
@@ -333,7 +332,6 @@ def process_detection(frame, cam_id: int):
                     delete_person_session_by_id(cam_id, tid) 
                     app.logger.info(f"Sesi dibatalkan (terlalu pendek): cam_id={cam_id}, tracking_id={tid}")
                 ids_to_remove.add(tid)
-        
         for tid in ids_to_remove:
             active_sessions[cam_id].pop(tid, None)
 
@@ -735,25 +733,39 @@ def edit_zone(camera_id):
 
 @app.route("/set_zone/<int:camera_id>", methods=["POST"])
 def set_zone(camera_id):
-    zone_data = request.form.get("zone_coordinates")
-    conn = get_connection()
-    cursor = conn.cursor()
+    zone_data_str = request.form.get("zone_coordinates")
+    conn = None
+    
     try:
+        if not zone_data_str:
+            zone_data_to_save = None
+        else:
+            zone_points = json.loads(zone_data_str)
+            if len(zone_points) < 3:
+                flash("Zona harus memiliki minimal 3 titik. Silakan buat zona terlebih dahulu.", "error")
+                return redirect(url_for("edit_zone", camera_id=camera_id))
+            zone_data_to_save = json.dumps(zone_points)
+        conn = get_connection()
+        cursor = conn.cursor()
+        
         cursor.execute(
             "UPDATE cctv SET zone = %s WHERE id = %s",
-            (zone_data, camera_id)
+            (zone_data_to_save, camera_id)
         )
         conn.commit()
-        flash("Zone saved successfully!", "success")
-        # Mulai thread baru untuk memuat ulang data, dan pastikan daemon=True
-        threading.Thread(target=start_camera_threads, daemon=True).start()
+        flash("Zona berhasil diperbarui!", "success")
+    except json.JSONDecodeError:
+        flash("Data zona tidak valid. Pastikan formatnya benar.", "error")
+        return redirect(url_for("edit_zone", camera_id=camera_id))
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         app.logger.error(f"Error saving zone for camera {camera_id}: {str(e)}")
         flash(f"Error saving zone: {str(e)}", "error")
     finally:
-        cursor.close()
-        conn.close()
+        if conn:
+            conn.close()
+            
     return redirect(url_for("index"))
 
 if __name__ == "__main__":

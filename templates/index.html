@@ -7,8 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
     <style>
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap');
-
-        /* ================== STYLING BARU ================== */
         :root {
             --primary-color: #2c3e50;
             --secondary-color: #3498db;
@@ -360,10 +358,7 @@
 </footer>
 
 <script>
-    // ===== DATA CAMERAS DARI FLASK JADI JS =====
     const cameras = {{ cameras|tojson }};
-
-    // ===== UPDATE PEOPLE COUNT (tidak berubah) =====
     function updatePeopleCount(cameraId) {
         fetch(`/person_count/${cameraId}`)
             .then(res => res.json())
@@ -376,7 +371,7 @@
             .catch(err => console.error("Error updating people count:", err));
     }
 
-    // ===== UPDATE TABEL RIWAYAT SESI BARU =====
+    
     function updateEventLog() {
         fetch("/events_json")
             .then(res => res.json())
@@ -403,19 +398,14 @@
             })
             .catch(err => console.error("Error updating event log:", err));
     }
-
-    // ===== START INTERVAL UNTUK SEMUA CAMERAS DAN LOG =====
     function startUpdatingAll() {
         cameras.forEach(cam => {
             setInterval(() => updatePeopleCount(cam.id), 2000);
         });
-        // Update log setiap 5 detik
         setInterval(updateEventLog, 5000);
-        // Jalankan pertama kali saat load
         updateEventLog();
     }
 
-    // ===== JALANKAN SAAT HALAMAN LOAD =====
     window.onload = startUpdatingAll;
 </script>
 
