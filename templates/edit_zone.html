@@ -5,12 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Edit Zona Kamera {{ camera.id }} - {{ camera.name }}</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+        :root {
+            --primary-color: #4A90E2;
+            --secondary-color: #3B7DC4;
+            --background-light: #F0F4F8;
+            --surface-card: #FFFFFF;
+            --text-main: #2C3E50;
+            --text-secondary: #7F8C8D;
+            --border-color: #EAECEE;
+            --success-color: #2ECC71;
+            --success-hover: #27AE60;
+            --danger-color: #E74C3C;
+            --danger-hover: #C0392B;
+            --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f4;
-            color: #333;
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--background-light);
+            color: var(--text-main);
             margin: 0;
-            padding: 0;
+            padding: 20px;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -18,32 +36,42 @@
         }
 
         .container {
-            background-color: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            background-color: var(--surface-card);
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-light);
             text-align: center;
-            width: 90%;
-            max-width: 600px;
+            width: 95%;
+            max-width: 650px;
+            box-sizing: border-box;
+            transition: box-shadow 0.3s ease;
+        }
+
+        .container:hover {
+            box-shadow: var(--shadow-hover);
         }
 
         h1 {
-            color: #337ab7;
-            margin-bottom: 20px;
+            color: var(--primary-color);
+            margin-bottom: 25px;
+            font-weight: 600;
+            font-size: 1.8rem;
         }
-
+        
         .image-container {
             position: relative;
             width: 100%;
-            margin-bottom: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
             overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
 
         .image-container img {
             width: 100%;
             display: block;
+            border-radius: 8px;
         }
 
         .canvas-overlay {
@@ -56,34 +84,68 @@
         }
 
         #coords-display {
-            margin-top: 15px;
-            font-size: 0.95rem;
-            color: #555;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            background-color: #F8F9FA;
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            word-wrap: break-word;
+        }
+        
+        #coordinates {
+            font-family: 'Courier New', Courier, monospace;
+            color: var(--text-main);
+            font-weight: 600;
         }
 
-        #save-form {
-            margin-top: 25px;
+        .button-group {
+            margin-top: 30px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        
+        .btn {
+            padding: 14px 30px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
         .btn-save {
-            background-color: #5cb85c;
+            background: linear-gradient(135deg, var(--success-color), #28B463);
             color: white;
-            padding: 12px 25px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: background-color 0.3s ease;
+            box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3);
         }
 
         .btn-save:hover {
-            background-color: #4cae4c;
+            background: linear-gradient(135deg, var(--success-hover), #229954);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(46, 204, 113, 0.4);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--danger-color), #CB4335);
+            color: white;
+            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: linear-gradient(135deg, var(--danger-hover), #A93226);
+            transform: translateY(-2px);
+            box-shadow: 6px 12px rgba(231, 76, 60, 0.4);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Edit Zona untuk {{ camera.name }}</h1>
+        <h1>Edit Zona untuk <br/>{{ camera.name }}</h1>
 
         <div class="image-container">
             <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
@@ -93,11 +155,16 @@
         <div id="coords-display">
             Koordinat: <span id="coordinates">{% if current_zone %}{{ current_zone|tojson }}{% else %}[]{% endif %}</span>
         </div>
-
-        <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}">
-            <input type="hidden" name="zone_coordinates" id="zone-input" value="{{ current_zone|tojson }}">
-            <button type="submit" class="btn-save">Simpan Zona</button>
-        </form>
+        
+        <div class="button-group">
+            <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}" style="display:inline;">
+                <input type="hidden" name="zone_coordinates" id="zone-input" value="{{ current_zone|tojson }}">
+                <button type="submit" class="btn btn-save">Simpan Zona</button>
+            </form>
+            <form id="delete-form" method="POST" action="{{ url_for('delete_zone', camera_id=camera.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-danger">Hapus Zona</button>
+            </form>
+        </div>
     </div>
 
     <script>
@@ -109,8 +176,17 @@
 
             const ctx = canvas.getContext('2d');
             let points = [];
-coordsDisplay.textContent = JSON.stringify(points);
-zoneInput.value = JSON.stringify(points);
+            
+            try {
+                const initialCoords = JSON.parse(zoneInput.value);
+                if (Array.isArray(initialCoords)) {
+                    points = initialCoords;
+                }
+            } catch (e) {
+                console.error("Failed to parse initial coordinates.");
+            }
+
+            coordsDisplay.textContent = JSON.stringify(points);
 
             function resizeCanvas() {
                 canvas.width = videoFeed.naturalWidth;
@@ -138,7 +214,11 @@ zoneInput.value = JSON.stringify(points);
             }
 
             canvas.addEventListener('click', function(event) {
-
+                if (points.length === 0) {
+                    points = [];
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            
                 const rect = canvas.getBoundingClientRect();
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
@@ -153,11 +233,14 @@ zoneInput.value = JSON.stringify(points);
                 redraw();
             });
 
-            videoFeed.onload = resizeCanvas;
+            videoFeed.onload = function() {
+                resizeCanvas();
+                redraw();
+            };
             window.addEventListener('resize', resizeCanvas);
 
             if (videoFeed.complete) {
-                resizeCanvas();
+                videoFeed.onload();
             }
         });
     </script>

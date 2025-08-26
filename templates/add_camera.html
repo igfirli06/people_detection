@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Add New Camera</title>
     <style>
         /* Paste the new CSS code here */
@@ -83,28 +84,6 @@
             transform: translateY(0);
         }
 
-        .messages {
-            margin-bottom: 20px;
-            font-weight: 600;
-            text-align: center;
-            padding: 10px;
-            border-radius: 6px;
-        }
-
-        .messages p {
-            margin: 0;
-        }
-
-        .success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .error {
-            background-color: #ffebee;
-            color: #c62828;
-        }
-
         a.back-link {
             display: block;
             margin-top: 25px;
@@ -124,16 +103,6 @@
 <body>
     <div class="form-container">
         <h1>Add New Camera</h1>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <div class="messages">
-              {% for category, message in messages %}
-                <p class="{{ category }}">{{ message }}</p>
-              {% endfor %}
-            </div>
-          {% endif %}
-        {% endwith %}
 
         <form method="post" action="{{ url_for('add_camera') }}">
             <label for="name">Camera Name</label>
