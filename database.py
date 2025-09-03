@@ -24,15 +24,20 @@ def load_cameras_from_db():
         zone = []
         if row["zone"]:
             try:
-                zone = json.loads(row["zone"])
-            except Exception as e:
+                if isinstance(row["zone"], str):
+                    zone = json.loads(row["zone"])
+                else:
+                    zone = row["zone"]
+            except (json.JSONDecodeError, TypeError) as e:
                 print(f"[WARNING] Zone tidak valid untuk kamera {row['id']}: {row['zone']} -> {e}")
                 zone = []
         cameras.append({
             "id": row["id"],
             "name": row["name"],
             "rtsp_url": row["rtsp_url"],
-            "zone": zone
+            "zone": zone,
+            "min_session_duration": row.get("min_session_duration", 10),
+            "is_active": row.get("is_active", 1)
         })
     return cameras
 
@@ -40,17 +45,20 @@ def save_person_session_start(camera_id, tracking_id):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        now = datetime.now()
-        cursor.execute("""
-            INSERT INTO person_sessions (camera_id, tracking_id, start_time)
-            VALUES (%s, %s, %s)
-        """, (camera_id, tracking_id, now))
+        cursor.execute(
+            "INSERT INTO person_sessions (camera_id, tracking_id, start_time) VALUES (%s, %s, NOW())",
+            (camera_id, tracking_id)
+        )
         conn.commit()
+        return cursor.lastrowid
+    except Exception as e:
+        print(f"Failed to save session start: {e}")
+        return None
     finally:
         cursor.close()
         conn.close()
 
-def update_person_session_end(camera_id, tracking_id, duration):
+def update_person_session_end(session_id: int, duration: int):
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -58,14 +66,30 @@ def update_person_session_end(camera_id, tracking_id, duration):
         cursor.execute("""
             UPDATE person_sessions
             SET end_time = %s, duration = %s
-            WHERE camera_id = %s AND tracking_id = %s AND end_time IS NULL
-        """, (now, duration, camera_id, tracking_id))
+            WHERE id = %s
+        """, (now, duration, session_id))
         conn.commit()
+    except Exception as e:
+        print(f"Failed to update session end: {e}")
     finally:
         cursor.close()
         conn.close()
 
-# Gabungkan kedua fungsi get_person_sessions menjadi satu fungsi yang lebih baik
+def delete_person_session_by_id(session_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM person_sessions WHERE id = %s AND end_time IS NULL",
+            (session_id,)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Failed to delete short session: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
 def get_person_sessions(limit: int = 20) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
@@ -102,21 +126,6 @@ def export_sessions_to_excel(file_path):
     df = pd.read_sql(query, conn)
     conn.close()
     df['duration_formatted'] = df['duration'].apply(
-        lambda x: f"{x // 3600:02d}:{(x % 3600) // 60:02d}:{x % 60:02d}"
+        lambda x: f"{int(x // 3600):02d}:{int((x % 3600) // 60):02d}:{int(x % 60):02d}"
     )
     df.to_excel(file_path, index=False)
-    
-def delete_person_session_by_id(camera_id, tracking_id):
-    conn = get_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "DELETE FROM person_sessions WHERE camera_id = %s AND tracking_id = %s AND end_time IS NULL",
-            (camera_id, tracking_id)
-        )
-        conn.commit()
-    except Exception as e:
-        print(f"Failed to delete short session: {e}")
-    finally:
-        cur.close()
-        conn.close()

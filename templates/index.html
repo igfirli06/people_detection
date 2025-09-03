@@ -6,7 +6,9 @@
     <title>Sistem Deteksi - Kutai Timber</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap');
+
         :root {
             --primary-color: #2c3e50;
             --secondary-color: #3498db;
@@ -65,7 +67,7 @@
             max-width: 1200px;
             margin: 0 auto;
         }
-        
+
         .add-camera-link {
             text-align: right;
             margin-bottom: 25px;
@@ -103,7 +105,7 @@
             box-shadow: var(--shadow-light);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        
+
         .camera-container:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
@@ -153,7 +155,7 @@
             background-color: var(--btn-blue-hover);
             transform: translateY(-1px);
         }
-        
+
         .btn-delete {
             background-color: var(--btn-red);
         }
@@ -196,7 +198,7 @@
             text-align: left;
             border-bottom: 1px solid var(--border-color);
         }
-        
+
         .log-wrapper tr:last-child td {
             border-bottom: none;
         }
@@ -212,13 +214,13 @@
             font-size: 0.95rem;
             color: var(--text-main);
         }
-        
+
         .log-wrapper .no-data {
             text-align: center;
             color: var(--text-secondary);
             font-style: italic;
         }
-        
+
         .download-excel {
             display: inline-block;
             margin-top: 25px;
@@ -231,7 +233,7 @@
             font-weight: 600;
             transition: background-color 0.3s ease;
         }
-        
+
         .download-excel:hover {
             background-color: #229954;
         }
@@ -339,7 +341,7 @@
                 </tr>
             </thead>
             <tbody id="events-body">
-                </tbody>
+            </tbody>
         </table>
         <div style="text-align: center;">
             <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
@@ -371,39 +373,41 @@
             .catch(err => console.error("Error updating people count:", err));
     }
 
-    
     function updateEventLog() {
         fetch("/events_json")
             .then(res => res.json())
             .then(data => {
                 const tableBody = document.getElementById("events-body");
-                tableBody.innerHTML = ""; // Bersihkan tabel
-
+                let htmlContent = '';
+                
                 if (data.length === 0) {
-                    const noDataRow = `<tr><td colspan="4" class="no-data">Belum ada data sesi</td></tr>`;
-                    tableBody.innerHTML = noDataRow;
+                    htmlContent = `<tr><td colspan="4" class="no-data">Belum ada data sesi</td></tr>`;
                 } else {
                     data.forEach(event => {
-                        const row = document.createElement("tr");
-                        const durationText = event.duration ? event.duration : 'Masih dalam zona';
-                        row.innerHTML = `
-                            <td>${event.camera_name}</td>
-                            <td>${event.start_time}</td>
-                            <td>${event.end_time ? event.end_time : '-'}</td>
-                            <td>${durationText}</td>
+                        const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
+                        const endTimeText = event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
+                        htmlContent += `
+                            <tr>
+                                <td>${event.camera_name}</td>
+                                <td>${event.start_time}</td>
+                                <td>${endTimeText}</td>
+                                <td>${durationText}</td>
+                            </tr>
                         `;
-                        tableBody.appendChild(row);
                     });
                 }
+                tableBody.innerHTML = htmlContent;
             })
             .catch(err => console.error("Error updating event log:", err));
     }
+
     function startUpdatingAll() {
         cameras.forEach(cam => {
             setInterval(() => updatePeopleCount(cam.id), 2000);
         });
-        setInterval(updateEventLog, 5000);
+
         updateEventLog();
+        setInterval(updateEventLog, 3000);
     }
 
     window.onload = startUpdatingAll;

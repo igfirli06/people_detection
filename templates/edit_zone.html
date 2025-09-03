@@ -6,7 +6,6 @@
     <title>Edit Zona Kamera {{ camera.id }} - {{ camera.name }}</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
-
         :root {
             --primary-color: #4A90E2;
             --secondary-color: #3B7DC4;
@@ -22,7 +21,6 @@
             --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.08);
             --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
         }
-
         body {
             font-family: 'Poppins', sans-serif;
             background-color: var(--background-light);
@@ -34,7 +32,6 @@
             align-items: center;
             min-height: 100vh;
         }
-
         .container {
             background-color: var(--surface-card);
             padding: 40px;
@@ -46,18 +43,15 @@
             box-sizing: border-box;
             transition: box-shadow 0.3s ease;
         }
-
         .container:hover {
             box-shadow: var(--shadow-hover);
         }
-
         h1 {
             color: var(--primary-color);
             margin-bottom: 25px;
             font-weight: 600;
             font-size: 1.8rem;
         }
-        
         .image-container {
             position: relative;
             width: 100%;
@@ -67,13 +61,11 @@
             overflow: hidden;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
-
         .image-container img {
             width: 100%;
             display: block;
             border-radius: 8px;
         }
-
         .canvas-overlay {
             position: absolute;
             top: 0;
@@ -82,7 +74,6 @@
             height: 100%;
             cursor: crosshair;
         }
-
         #coords-display {
             margin-top: 20px;
             font-size: 0.9rem;
@@ -93,20 +84,17 @@
             border: 1px solid var(--border-color);
             word-wrap: break-word;
         }
-        
         #coordinates {
             font-family: 'Courier New', Courier, monospace;
             color: var(--text-main);
             font-weight: 600;
         }
-
         .button-group {
             margin-top: 30px;
             display: flex;
             justify-content: center;
             gap: 15px;
         }
-        
         .btn {
             padding: 14px 30px;
             border: none;
@@ -117,45 +105,77 @@
             letter-spacing: 0.5px;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-
         .btn-save {
             background: linear-gradient(135deg, var(--success-color), #28B463);
             color: white;
             box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3);
         }
-
         .btn-save:hover {
             background: linear-gradient(135deg, var(--success-hover), #229954);
             transform: translateY(-2px);
             box-shadow: 0 6px 12px rgba(46, 204, 113, 0.4);
         }
-
         .btn-danger {
             background: linear-gradient(135deg, var(--danger-color), #CB4335);
             color: white;
             box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
         }
-
         .btn-danger:hover {
             background: linear-gradient(135deg, var(--danger-hover), #A93226);
             transform: translateY(-2px);
             box-shadow: 0 6px 12px rgba(231, 76, 60, 0.4);
+        } 
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
+        }
+        hr {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 40px 0;
+        }
+        .time-inputs {
+            display: flex;
+            gap: 15px;
+            justify-content: space-between;
+        }
+        .time-inputs .time-input-group {
+            flex: 1;
+        }
+        .time-input-group input {
+            text-align: center;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Edit Zona untuk <br/>{{ camera.name }}</h1>
-
         <div class="image-container">
             <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
             <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
         </div>
-
         <div id="coords-display">
             Koordinat: <span id="coordinates">{% if current_zone %}{{ current_zone|tojson }}{% else %}[]{% endif %}</span>
         </div>
-        
         <div class="button-group">
             <form id="save-form" method="POST" action="{{ url_for('set_zone', camera_id=camera.id) }}" style="display:inline;">
                 <input type="hidden" name="zone_coordinates" id="zone-input" value="{{ current_zone|tojson }}">
@@ -165,10 +185,35 @@
                 <button type="submit" class="btn btn-danger">Hapus Zona</button>
             </form>
         </div>
+        <hr>
+        <h3>Pengaturan Durasi Sesi Minimal</h3>
+        <form action="{{ url_for('set_min_session_duration', camera_id=camera.id) }}" method="post">
+            {% set total_seconds = camera.min_session_duration|int %}
+            {% set hours = (total_seconds // 3600) %}
+            {% set minutes = (total_seconds % 3600) // 60 %}
+            {% set seconds = total_seconds % 60 %}
 
+            <div class="form-group time-inputs">
+                <div class="time-input-group">
+                    <label for="min_duration_hours">Jam</label>
+                    <input type="number" id="min_duration_hours" name="min_duration_hours" class="form-control" 
+                           value="{{ hours }}" min="0">
+                </div>
+                <div class="time-input-group">
+                    <label for="min_duration_minutes">Menit</label>
+                    <input type="number" id="min_duration_minutes" name="min_duration_minutes" class="form-control" 
+                           value="{{ minutes }}" min="0" max="59">
+                </div>
+                <div class="time-input-group">
+                    <label for="min_duration_seconds">Detik</label>
+                    <input type="number" id="min_duration_seconds" name="min_duration_seconds" class="form-control" 
+                           value="{{ seconds }}" min="0" max="59">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-save">Simpan Durasi</button>
+        </form>
         <p><a href="{{ url_for('index') }}" style="color: var(--primary-color); text-decoration: none; font-weight: 600; margin-top: 20px; display: inline-block;">&larr; Kembali ke Halaman Utama</a></p>
     </div>
-
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const canvas = document.getElementById('drawing-canvas');
@@ -176,10 +221,8 @@
             const coordsDisplay = document.getElementById('coordinates');
             const zoneInput = document.getElementById('zone-input');
             const saveForm = document.getElementById('save-form');
-
             const ctx = canvas.getContext('2d');
             let points = [];
-            
             try {
                 const initialCoords = JSON.parse(zoneInput.value);
                 if (Array.isArray(initialCoords)) {
@@ -188,9 +231,7 @@
             } catch (e) {
                 console.error("Failed to parse initial coordinates.");
             }
-
             coordsDisplay.textContent = JSON.stringify(points);
-
             function resizeCanvas() {
                 canvas.width = videoFeed.naturalWidth;
                 canvas.height = videoFeed.naturalHeight;
@@ -198,7 +239,6 @@
                 canvas.style.height = videoFeed.offsetHeight + 'px';
                 redraw();
             }
-
             function redraw() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 if (points.length > 1) {
@@ -215,7 +255,6 @@
                     ctx.stroke();
                 }
             }
-
             canvas.addEventListener('click', function(event) {
                 if (points.length === 0) {
                     points = [];
@@ -235,14 +274,12 @@
                 
                 redraw();
             });
-
             saveForm.addEventListener('submit', function(event) {
                 if (points.length < 3) {
                     event.preventDefault();
                     alert("Zona harus memiliki minimal 3 titik. Silakan buat zona terlebih dahulu.");
                 }
             });
-
             videoFeed.onload = function() {
                 resizeCanvas();
                 redraw();
