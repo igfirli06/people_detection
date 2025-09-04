@@ -321,6 +321,9 @@
             <div class="controls">
                 <a href="{{ url_for('edit_zone', camera_id=cam.id) }}" class="btn btn-edit-zone">Edit Zona</a>
             </div>
+            <div class="people-detection">
+                Orang Terdeteksi: <span id="people-count-{{ cam.id }}">0</span>
+            </div>
         </div>
         {% else %}
         <div style="grid-column: 1 / -1; text-align:center; padding: 20px;">
@@ -335,13 +338,14 @@
             <thead>
                 <tr>
                     <th>Kamera</th>
+                    <th>Zona</th>
                     <th>Waktu Masuk</th>
                     <th>Waktu Keluar</th>
                     <th>Durasi</th>
                 </tr>
             </thead>
             <tbody id="events-body">
-            </tbody>
+                </tbody>
         </table>
         <div style="text-align: center;">
             <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
@@ -361,6 +365,7 @@
 
 <script>
     const cameras = {{ cameras|tojson }};
+
     function updatePeopleCount(cameraId) {
         fetch(`/person_count/${cameraId}`)
             .then(res => res.json())
@@ -381,14 +386,20 @@
                 let htmlContent = '';
                 
                 if (data.length === 0) {
-                    htmlContent = `<tr><td colspan="4" class="no-data">Belum ada data sesi</td></tr>`;
+                    // ## PERUBAHAN: Colspan disesuaikan menjadi 5 ##
+                    htmlContent = `<tr><td colspan="5" class="no-data">Belum ada data sesi</td></tr>`;
                 } else {
                     data.forEach(event => {
                         const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
-                        const endTimeText = event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
+                        const endTimeText = event.end_time !== 'Sesi Aktif' && event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
+                        
+                        // ## PERUBAHAN: Menambahkan data 'zone_name' ke dalam baris tabel ##
+                        const zoneNameText = event.zone_name || '<span style="color: #7f8c8d;">Tanpa Zona</span>';
+                        
                         htmlContent += `
                             <tr>
                                 <td>${event.camera_name}</td>
+                                <td>${zoneNameText}</td>
                                 <td>${event.start_time}</td>
                                 <td>${endTimeText}</td>
                                 <td>${durationText}</td>
@@ -403,10 +414,15 @@
 
     function startUpdatingAll() {
         cameras.forEach(cam => {
+            // Panggil sekali di awal agar tidak menunggu 2 detik pertama
+            updatePeopleCount(cam.id);
+            // Kemudian set interval
             setInterval(() => updatePeopleCount(cam.id), 2000);
         });
 
+        // Panggil sekali di awal
         updateEventLog();
+        // Set interval untuk update log
         setInterval(updateEventLog, 3000);
     }
 
