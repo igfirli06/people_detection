@@ -331,7 +331,6 @@
         </div>
         {% endfor %}
     </div>
-
     <div class="log-wrapper">
         <h2>Riwayat Sesi</h2>
         <table>
@@ -352,7 +351,6 @@
         </div>
     </div>
 </main>
-
 <footer>
     <p>"Tidak ada kata tak mungkin, semuanya hanya butuh device yang layak."</p>
     <p>igfirliiaziiza@gmail.com</p>
@@ -365,7 +363,6 @@
 
 <script>
     const cameras = {{ cameras|tojson }};
-
     function updatePeopleCount(cameraId) {
         fetch(`/person_count/${cameraId}`)
             .then(res => res.json())
@@ -377,23 +374,18 @@
             })
             .catch(err => console.error("Error updating people count:", err));
     }
-
     function updateEventLog() {
         fetch("/events_json")
             .then(res => res.json())
             .then(data => {
                 const tableBody = document.getElementById("events-body");
                 let htmlContent = '';
-                
                 if (data.length === 0) {
-                    // ## PERUBAHAN: Colspan disesuaikan menjadi 5 ##
                     htmlContent = `<tr><td colspan="5" class="no-data">Belum ada data sesi</td></tr>`;
                 } else {
                     data.forEach(event => {
                         const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
                         const endTimeText = event.end_time !== 'Sesi Aktif' && event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
-                        
-                        // ## PERUBAHAN: Menambahkan data 'zone_name' ke dalam baris tabel ##
                         const zoneNameText = event.zone_name || '<span style="color: #7f8c8d;">Tanpa Zona</span>';
                         
                         htmlContent += `
@@ -414,18 +406,12 @@
 
     function startUpdatingAll() {
         cameras.forEach(cam => {
-            // Panggil sekali di awal agar tidak menunggu 2 detik pertama
             updatePeopleCount(cam.id);
-            // Kemudian set interval
             setInterval(() => updatePeopleCount(cam.id), 2000);
         });
-
-        // Panggil sekali di awal
         updateEventLog();
-        // Set interval untuk update log
-        setInterval(updateEventLog, 3000);
+        setInterval(updateEventLog, 1000);
     }
-
     window.onload = startUpdatingAll;
 </script>
 

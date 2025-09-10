@@ -8,6 +8,7 @@ import cv2
 import json
 import ast
 from flask import (
+
     Flask,
     Response,
     render_template,
@@ -18,6 +19,7 @@ from flask import (
     flash,
     send_file,
 )
+
 from ultralytics import YOLO
 from database import (
     load_cameras_from_db,
@@ -65,14 +67,12 @@ except Exception as e:
     app.logger.error(f"Gagal load YOLO model di {MODEL_PATH}: {e}")
     model = None
 
-# ## FUNGSI YANG DIPERBAIKI ##
 def load_all_zones_from_db() -> Dict[int, List[Dict[str, Any]]]:
     """Memuat semua zona dari database dan mengelompokkannya berdasarkan camera_id."""
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        # PERBAIKAN: Mengganti 'name' menjadi 'zone_name'.
-        # Menggunakan 'AS name' agar sisa kode Python tidak perlu diubah.
+
         cur.execute("SELECT id, camera_id, zone_name as name, coordinates FROM zones ORDER BY name ASC")
         zones_data = cur.fetchall()
         all_zones = {}
@@ -114,13 +114,12 @@ def save_person_session_start_with_zone(camera_id: int, tracking_id: int, zone_i
         cur.close()
         conn.close()
 
-# ## FUNGSI YANG DIPERBAIKI ##
 def get_person_sessions_with_zones(limit: int = 50) -> List[Dict[str, Any]]:
     """Mengambil data sesi orang dengan nama kamera dan nama zona."""
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        # PERBAIKAN: Mengganti 'z.name' menjadi 'z.zone_name'.
+      
         query = """
             SELECT
                 ps.id, ps.camera_id, c.name AS camera_name,
@@ -142,6 +141,7 @@ def get_person_sessions_with_zones(limit: int = 50) -> List[Dict[str, Any]]:
         conn.close()
 
 def is_inside_zone(bbox, zone_points, min_overlap_ratio=0.2):
+    
     bx1, by1, bx2, by2 = bbox
     bbox_area = (bx2 - bx1) * (by2 - by1)
     if bbox_area <= 0: return False
@@ -159,6 +159,7 @@ def is_inside_zone(bbox, zone_points, min_overlap_ratio=0.2):
     return overlap_ratio >= min_overlap_ratio
 
 def ensure_schema() -> None:
+    
     conn = None
     cur = None
     try:
@@ -195,15 +196,19 @@ def ensure_schema() -> None:
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_schedule_enabled'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_schedule_enabled TINYINT(1) DEFAULT 0")
+        
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_start_time'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_start_time TIME NULL")
+        
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_end_time'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_end_time TIME NULL")
+        
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'min_session_duration'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN min_session_duration INT DEFAULT 10")
+        
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS zones (
@@ -228,6 +233,7 @@ def ensure_schema() -> None:
         if conn: conn.close()
 
 def init_camera_data(cams: List[Dict[str, Any]]) -> None:
+    
     all_camera_zones = load_all_zones_from_db()
     CAM_ZONES.clear()
     MIN_SESSION_DURATIONS.clear()
@@ -260,6 +266,7 @@ def close_writer(cam_id: int):
         if w is not None:
             try: w.release()
             except Exception as e: app.logger.error(f"Gagal menutup writer untuk kamera {cam_id}: {e}")
+        
         app.logger.info(f"Rekaman dihentikan kamera {cam_id}")
         writers[cam_id] = None
         info = writer_info.get(cam_id) or {}
@@ -269,6 +276,7 @@ def close_writer(cam_id: int):
         last_write_time[cam_id] = 0.0
 
 def capture_thread_fn(cam_id: int, rtsp_url: str):
+    
     cap = None
     backoff = RTSP_OPEN_RETRY_SECONDS
     app.logger.info(f"Starting capture thread for camera {cam_id}")
@@ -297,12 +305,14 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
             if writer_info.get(cam_id, {}).get("size") is None:
                 writer_info[cam_id]["size"] = (frame.shape[1], frame.shape[0])
         time.sleep(0.001)
+    
     if cap is not None:
         try: cap.release()
         except Exception: pass
     app.logger.info(f"Capture thread stopped for camera {cam_id}")
 
 def process_detection(frame, cam_id: int):
+    
     global active_sessions
     try:
         if frame is None or model is None: return frame, 0, "Unknown"
@@ -320,6 +330,7 @@ def process_detection(frame, cam_id: int):
             cv2.polylines(annotated, [original_points_np], isClosed=True, color=(255, 255, 0), thickness=2)
             label_pos = (original_points_np[0][0], original_points_np[0][1] - 10)
             cv2.putText(annotated, zone['name'], label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        
         if cam_id not in active_sessions: active_sessions[cam_id] = {}
         current_person_locations = {}
         if results and hasattr(results[0], "boxes") and results[0].boxes is not None:
@@ -334,6 +345,7 @@ def process_detection(frame, cam_id: int):
                         if is_inside_zone((x1, y1, x2, y2), scaled_zone_points):
                             current_person_locations[tracking_id] = {'zone_id': zone['id'], 'zone_name': zone['name']}
                             break
+        
         active_cam_sessions = active_sessions[cam_id]
         current_tracking_ids = set(current_person_locations.keys())
         previous_tracking_ids = set(active_cam_sessions.keys())
@@ -351,6 +363,7 @@ def process_detection(frame, cam_id: int):
                         update_person_session_end(session_db_id, int(duration))
                         app.logger.info(f"Sesi selesai (keluar): cam={cam_id}, tid={tid}, zona={session_data['zone_name']}, durasi={duration:.2f}s")
                 else: app.logger.info(f"Sesi dibatalkan (terlalu pendek): cam={cam_id}, tid={tid}")
+       
         for tid in (previous_tracking_ids & current_tracking_ids):
             session_data = active_cam_sessions[tid]
             current_zone_info = current_person_locations[tid]
@@ -530,7 +543,6 @@ def add_camera():
         return redirect(url_for("index"))
     return render_template("add_camera.html")
 
-# ## FUNGSI YANG DIPERBAIKI ##
 @app.route("/edit_zone/<int:camera_id>")
 def edit_zone(camera_id):
     conn = get_connection()
@@ -539,14 +551,11 @@ def edit_zone(camera_id):
         cursor.execute("SELECT id, name, min_session_duration FROM cctv WHERE id = %s", (camera_id,))
         camera = cursor.fetchone()
         if not camera: return "Kamera tidak ditemukan", 404
-        
-        # PERBAIKAN: Mengganti 'name' menjadi 'zone_name'.
         cursor.execute("SELECT id, zone_name, coordinates FROM zones WHERE camera_id = %s", (camera_id,))
         zones_db = cursor.fetchall()
         zones = []
         for z in zones_db:
             try:
-                # Ganti nama key dari 'zone_name' ke 'name' agar template tidak perlu diubah
                 z['name'] = z.pop('zone_name') 
                 z['coordinates_str'] = z['coordinates']
                 z['coordinates'] = ast.literal_eval(z['coordinates'])
@@ -559,7 +568,6 @@ def edit_zone(camera_id):
         conn.close()
     return render_template("edit_zone.html", camera=camera, zones=zones)
 
-# ## FUNGSI YANG DIPERBAIKI ##
 @app.route("/add_zone/<int:camera_id>", methods=["POST"])
 def add_zone(camera_id):
     zone_name = request.form.get("zone_name")
@@ -572,10 +580,8 @@ def add_zone(camera_id):
         if not isinstance(points, list) or len(points) < 3:
             flash("Zona harus memiliki minimal 3 titik.", "error")
             return redirect(url_for("edit_zone", camera_id=camera_id))
-        
         conn = get_connection()
         cursor = conn.cursor()
-        # PERBAIKAN: Mengganti 'name' menjadi 'zone_name' pada query INSERT.
         cursor.execute( "INSERT INTO zones (camera_id, zone_name, coordinates) VALUES (%s, %s, %s)", (camera_id, zone_name, json.dumps(points)))
         conn.commit()
         flash(f"Zona '{zone_name}' berhasil ditambahkan.", "success")
