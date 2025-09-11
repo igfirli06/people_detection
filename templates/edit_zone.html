@@ -29,7 +29,7 @@
             padding: 20px;
             display: flex;
             justify-content: center;
-            align-items: flex-start; 
+            align-items: flex-start;
             min-height: 100vh;
         }
         .container {
@@ -39,7 +39,7 @@
             box-shadow: var(--shadow-light);
             text-align: center;
             width: 95%;
-            max-width: 800px; 
+            max-width: 800px;
             box-sizing: border-box;
             transition: box-shadow 0.3s ease;
             margin-top: 20px;
@@ -188,11 +188,12 @@
 <body>
     <div class="container">
         <h1>Pengaturan Zona untuk <br/>{{ camera.name }}</h1>
+
         <h3>Daftar Zona Tersimpan</h3>
         <div id="zone-list">
             {% for zone in zones %}
             <div class="zone-item">
-                <span>{{ zone.name }}</span>
+                <span>{{ zone.name }} (Max: {{ zone.max_people }})</span>
                 <form method="POST" action="{{ url_for('delete_zone_new', zone_id=zone.id) }}" onsubmit="return confirm('Apakah Anda yakin ingin menghapus zona \'{{ zone.name }}\'?');">
                     <button type="submit" class="btn-delete-small">Hapus</button>
                 </form>
@@ -203,50 +204,63 @@
         </div>
 
         <hr>
-        <h3>Gambar Zona Baru</h3>
-        <div class="image-container">
-            <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
-            <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
-        </div>
-        <div id="coords-display">
-            Koordinat Baru: <span id="coordinates">[]</span>
-        </div>
+        
+        <form id="combined-form" method="POST" action="{{ url_for('save_camera_settings', camera_id=camera.id) }}">
+            
+            <h3>Gambar Zona Baru</h3>
+            <div class="image-container">
+                <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
+                <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
+            </div>
+            <div id="coords-display">
+                Koordinat Baru: <span id="coordinates">[]</span>
+            </div>
 
-        <form id="add-zone-form" method="POST" action="{{ url_for('add_zone', camera_id=camera.id) }}">
             <div class="form-group" style="margin-top: 20px;">
                 <label for="zone_name">Nama Zona Baru</label>
-                <input type="text" id="zone_name" name="zone_name" class="form-control" required placeholder="Contoh: Pintu Masuk">
+                <input type="text" id="zone_name" name="zone_name" class="form-control" placeholder="Contoh: Pintu Masuk">
             </div>
+
+            <div class="form-group">
+                <label for="zone_max_people">Maksimal Jumlah Orang untuk Zona Ini</label>
+                <input type="number" id="zone_max_people" name="zone_max_people" class="form-control" value="0" min="0" required>
+            </div>
+
             <input type="hidden" name="zone_coordinates" id="zone-input">
             <div class="button-group">
-                <button type="submit" class="btn btn-save">Tambah Zona Baru</button>
                 <button type="button" id="reset-drawing-btn" class="btn btn-danger">Reset Gambar</button>
             </div>
-        </form>
-        <hr>
 
-        <h3>Pengaturan Durasi Sesi Minimal</h3>
-        <form action="{{ url_for('set_min_session_duration', camera_id=camera.id) }}" method="post">
-            {% set total_seconds = camera.min_session_duration|int %}
-            {% set hours = (total_seconds // 3600) %}
-            {% set minutes = (total_seconds % 3600) // 60 %}
-            {% set seconds = total_seconds % 60 %}
-            <div class="form-group time-inputs">
-                <div class="time-input-group">
-                    <label for="min_duration_hours">Jam</label>
-                    <input type="number" id="min_duration_hours" name="min_duration_hours" class="form-control" value="{{ hours }}" min="0">
-                </div>
-                <div class="time-input-group">
-                    <label for="min_duration_minutes">Menit</label>
-                    <input type="number" id="min_duration_minutes" name="min_duration_minutes" class="form-control" value="{{ minutes }}" min="0" max="59">
-                </div>
-                <div class="time-input-group">
-                    <label for="min_duration_seconds">Detik</label>
-                    <input type="number" id="min_duration_seconds" name="min_duration_seconds" class="form-control" value="{{ seconds }}" min="0" max="59">
+            <hr>
+
+            <h3>Pengaturan Lain</h3>
+            <div class="form-group">
+                <label>Durasi Sesi Minimal</label>
+                {% set total_seconds = camera.min_session_duration|int %}
+                {% set hours = (total_seconds // 3600) %}
+                {% set minutes = (total_seconds % 3600) // 60 %}
+                {% set seconds = total_seconds % 60 %}
+                <div class="time-inputs">
+                    <div class="time-input-group">
+                        <label for="min_duration_hours">Jam</label>
+                        <input type="number" id="min_duration_hours" name="min_duration_hours" class="form-control" value="{{ hours }}" min="0">
+                    </div>
+                    <div class="time-input-group">
+                        <label for="min_duration_minutes">Menit</label>
+                        <input type="number" id="min_duration_minutes" name="min_duration_minutes" class="form-control" value="{{ minutes }}" min="0" max="59">
+                    </div>
+                    <div class="time-input-group">
+                        <label for="min_duration_seconds">Detik</label>
+                        <input type="number" id="min_duration_seconds" name="min_duration_seconds" class="form-control" value="{{ seconds }}" min="0" max="59">
+                    </div>
                 </div>
             </div>
-            <button type="submit" class="btn btn-save">Simpan Durasi</button>
+
+            <div class="button-group">
+                <button type="submit" class="btn btn-save">Simpan Pengaturan</button>
+            </div>
         </form>
+        
         <p><a href="{{ url_for('index') }}" style="color: var(--primary-color); text-decoration: none; font-weight: 600; margin-top: 30px; display: inline-block;">&larr; Kembali ke Halaman Utama</a></p>
     </div>
 
@@ -256,11 +270,14 @@
             const videoFeed = document.getElementById('video-feed');
             const coordsDisplay = document.getElementById('coordinates');
             const zoneInput = document.getElementById('zone-input');
-            const addZoneForm = document.getElementById('add-zone-form');
+            const combinedForm = document.getElementById('combined-form');
             const resetBtn = document.getElementById('reset-drawing-btn');
+            const zoneNameInput = document.getElementById('zone_name');
+            const zoneMaxPeopleInput = document.getElementById('zone_max_people'); // Ambil input baru
             const ctx = canvas.getContext('2d');
             const existingZones = {{ zones|tojson }};
             let newPoints = [];
+
             function resizeCanvas() {
                 canvas.width = videoFeed.naturalWidth || videoFeed.offsetWidth;
                 canvas.height = videoFeed.naturalHeight || videoFeed.offsetHeight;
@@ -268,6 +285,7 @@
                 canvas.style.height = videoFeed.offsetHeight + 'px';
                 redraw();
             }
+
             function redraw() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.lineWidth = 3;
@@ -286,9 +304,12 @@
                             ctx.closePath();
                         }
                         ctx.stroke();
-                        ctx.fillText(zone.name, zone.coordinates[0][0] + 10, zone.coordinates[0][1] - 10);
+                        // Tampilkan nama zona dan jumlah orang
+                        const maxPeopleText = zone.max_people > 0 ? ` (Max: ${zone.max_people})` : '';
+                        ctx.fillText(`${zone.name}${maxPeopleText}`, zone.coordinates[0][0] + 10, zone.coordinates[0][1] - 10);
                     }
                 });
+
                 if (newPoints.length > 1) {
                     ctx.strokeStyle = '#FFFF00';
                     ctx.lineWidth = 4;
@@ -308,41 +329,59 @@
                 const rect = canvas.getBoundingClientRect();
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
+                
                 const naturalWidth = videoFeed.naturalWidth;
                 const naturalHeight = videoFeed.naturalHeight;
                 if (!naturalWidth || !naturalHeight) return;
+
                 const scaledX = Math.round((x / rect.width) * naturalWidth);
                 const scaledY = Math.round((y / rect.height) * naturalHeight);
+                
                 newPoints.push([scaledX, scaledY]);
+                
                 coordsDisplay.textContent = JSON.stringify(newPoints);
                 zoneInput.value = JSON.stringify(newPoints);
                 
                 redraw();
             });
+            
             resetBtn.addEventListener('click', function() {
                 newPoints = [];
                 coordsDisplay.textContent = '[]';
                 zoneInput.value = '[]';
+                zoneNameInput.value = '';
+                zoneMaxPeopleInput.value = '0'; 
                 redraw();
             });
-            addZoneForm.addEventListener('submit', function(event) {
-                const zoneNameInput = document.getElementById('zone_name');
-                if (newPoints.length < 3) {
-                    event.preventDefault();
-                    alert("Zona baru harus memiliki minimal 3 titik. Silakan klik pada gambar untuk membuat zona.");
-                    return;
-                }
-                if (zoneNameInput.value.trim() === '') {
-                    event.preventDefault();
-                    alert("Nama zona baru tidak boleh kosong.");
-                    zoneNameInput.focus();
-                    return;
+
+            combinedForm.addEventListener('submit', function(event) {
+                if (newPoints.length > 0) {
+                    if (newPoints.length < 3) {
+                        event.preventDefault();
+                        alert("Zona baru harus memiliki minimal 3 titik.");
+                        return;
+                    }
+                    if (zoneNameInput.value.trim() === '') {
+                        event.preventDefault();
+                        alert("Nama zona baru tidak boleh kosong.");
+                        zoneNameInput.focus();
+                        return;
+                    }
+                    if (zoneMaxPeopleInput.value.trim() === '' || isNaN(zoneMaxPeopleInput.value)) {
+                         event.preventDefault();
+                         alert("Maksimal jumlah orang untuk zona baru harus diisi dengan angka.");
+                         zoneMaxPeopleInput.focus();
+                         return;
+                    }
                 }
             });
+
             videoFeed.onload = function() {
                 resizeCanvas();
             };
+
             window.addEventListener('resize', resizeCanvas);
+
             if (videoFeed.complete) {
                 videoFeed.onload();
             }
