@@ -1,3 +1,4 @@
+
 import os
 import time
 import threading
@@ -26,9 +27,10 @@ from database import (
     load_cameras_from_db,
     get_connection,
     update_person_session_end,
-    export_sessions_to_excel,
-    delete_person_session_by_id,
-    )
+    export_person_sessions_to_excel,
+    export_empty_zone_sessions_to_excel,
+)
+
 
 MODEL_PATH = os.environ.get("YOLO_MODEL", "yolov8n.pt")
 RECORDINGS_DIR = os.environ.get("RECORDINGS_DIR", "recordings")
@@ -42,10 +44,11 @@ os.makedirs(EXPORTS_DIR, exist_ok=True)
 MIN_SESSION_DURATION = 10
 DEBUG_DRAW_ALL = True
 pending_notifications = collections.deque(maxlen=20) 
-
-TELEGRAM_API_TOKEN = "8283970823:AAE1653ZRnqixbl3bbR-YLNdz2fMc57ZIXE"
-TELEGRAM_CHAT_ID = "2072681716" 
-TELEGRAM_USERNAME = "Aji_Noor"
+last_state = None          # "aktif" atau "tidak_aktif"
+start_time = None
+zona_aktif = timedelta(0)
+zona_tidak_aktif = timedelta(0)
+pending_end_sessions = {}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "supersecret")
@@ -78,13 +81,21 @@ def load_all_zones_from_db() -> Dict[int, List[Dict[str, Any]]]:
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("SELECT id, camera_id, zone_name as name, coordinates, max_people FROM zones ORDER BY name ASC")
+        cur.execute("""
+            SELECT id, camera_id, zone_name AS name, coordinates, 
+                   max_people, max_inactive_duration
+            FROM zones
+            ORDER BY name ASC
+        """)
         zones_data = cur.fetchall()
-        all_zones = {}
+
+        all_zones: Dict[int, List[Dict[str, Any]]] = {}
+
         for zone in zones_data:
             cam_id = zone['camera_id']
             if cam_id not in all_zones:
                 all_zones[cam_id] = []
+
             try:
                 coords = json.loads(zone['coordinates'])
                 all_zones[cam_id].append({
@@ -92,22 +103,62 @@ def load_all_zones_from_db() -> Dict[int, List[Dict[str, Any]]]:
                     'name': zone['name'],
                     'points': coords,
                     'max_people': zone['max_people'],
+                    'max_inactive_duration': zone['max_inactive_duration'],
                     'notified_full': False,
-                    'last_count': 0 
+                    'last_count': 0
                 })
             except (json.JSONDecodeError, TypeError):
-                app.logger.error(f"Gagal parse koordinat untuk zona {zone['id']} di kamera {cam_id}")
+                app.logger.error(
+                    f"Gagal parse koordinat untuk zona {zone['id']} di kamera {cam_id}"
+                )
+
         return all_zones
+
     finally:
         cur.close()
         conn.close()
+
+
+def update_zone_status(people_count: int):
+    global last_state, start_time, zona_aktif, zona_tidak_aktif
+
+    now = datetime.now()
+
+    if people_count > 0:  # ada orang
+        if last_state != "aktif":
+            # reset timer saat status berubah
+            start_time = now
+            zona_aktif = timedelta(0)
+            last_state = "aktif"
+        else:
+            zona_aktif = now - start_time
+        zona_tidak_aktif = timedelta(0)  # pastikan reset
+
+    else:  # tidak ada orang
+        if last_state != "tidak_aktif":
+            start_time = now
+            zona_tidak_aktif = timedelta(0)
+            last_state = "tidak_aktif"
+        else:
+            zona_tidak_aktif = now - start_time
+        zona_aktif = timedelta(0)
+
+    # mulai dari 1 detik kalau sudah ada hitungan
+    aktif_seconds = int(zona_aktif.total_seconds())
+    tidak_aktif_seconds = int(zona_tidak_aktif.total_seconds())
+
+    if aktif_seconds > 0:
+        aktif_seconds = max(1, aktif_seconds)
+    if tidak_aktif_seconds > 0:
+        tidak_aktif_seconds = max(1, tidak_aktif_seconds)
+
+    return str(timedelta(seconds=aktif_seconds)), str(timedelta(seconds=tidak_aktif_seconds))
 
 def send_notification_get(cam_id: int, message: str):
     url_notif = "http://p2.kti.co.id/magang/checkNotif"
     payload = {
         "camera_id": cam_id,
         "message": message,
-        "username": TELEGRAM_USERNAME,
     }
     
     try:
@@ -185,48 +236,62 @@ def ensure_schema() -> None:
     try:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute(
-            """
+
+        # === Buat tabel cctv ===
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS cctv (
-                id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255),
-                rtsp_url TEXT, zone TEXT NULL, is_active TINYINT(1) DEFAULT 1
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255),
+                rtsp_url TEXT,
+                zone TEXT NULL,
+                is_active TINYINT(1) DEFAULT 1
             )
-            """
-        )
-        cur.execute(
-            """
+        """)
+
+        # === Buat tabel person_sessions ===
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS person_sessions (
-                id INT AUTO_INCREMENT PRIMARY KEY, camera_id INT NOT NULL,
-                tracking_id INT NOT NULL, start_time DATETIME NOT NULL,
-                end_time DATETIME NULL, duration INT NULL,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                camera_id INT NOT NULL,
+                tracking_id INT NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME NULL,
+                duration INT NULL,
                 FOREIGN KEY (camera_id) REFERENCES cctv(id) ON DELETE CASCADE
             )
-            """
-        )
-        cur.execute(
-            """
+        """)
+
+        # === Buat tabel people_detection ===
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS people_detection (
-                id INT AUTO_INCREMENT PRIMARY KEY, camera_id INT NOT NULL,
-                count INT NOT NULL, timestamp DATETIME NOT NULL,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                camera_id INT NOT NULL,
+                count INT NOT NULL,
+                timestamp DATETIME NOT NULL,
                 INDEX (camera_id),
                 FOREIGN KEY (camera_id) REFERENCES cctv(id) ON DELETE CASCADE
             )
-            """
-        )
+        """)
+
+        # === Tambahan kolom opsional di cctv ===
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_schedule_enabled'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_schedule_enabled TINYINT(1) DEFAULT 0")
+
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_start_time'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_start_time TIME NULL")
+
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'record_end_time'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN record_end_time TIME NULL")
+
         cur.execute("SHOW COLUMNS FROM cctv LIKE 'min_session_duration'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE cctv ADD COLUMN min_session_duration INT DEFAULT 10")
-        cur.execute(
-            """
+
+        # === Buat tabel zones ===
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS zones (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 camera_id INT NOT NULL,
@@ -234,23 +299,47 @@ def ensure_schema() -> None:
                 coordinates TEXT NOT NULL,
                 FOREIGN KEY (camera_id) REFERENCES cctv(id) ON DELETE CASCADE
             )
-            """
-        )
+        """)
+
         cur.execute("SHOW COLUMNS FROM person_sessions LIKE 'zone_id'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE person_sessions ADD COLUMN zone_id INT NULL AFTER camera_id")
+
         cur.execute("SHOW COLUMNS FROM zones LIKE 'max_people'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE zones ADD COLUMN max_people INT DEFAULT 0")
 
+        cur.execute("SHOW COLUMNS FROM zones LIKE 'max_inactive_duration'")
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE zones ADD COLUMN max_inactive_duration INT DEFAULT 0")
+
+        # === Buat tabel empty_zone_sessions untuk zona tidak aktif ===
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS empty_zone_sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                camera_id INT NOT NULL,
+                zone_id INT NOT NULL,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME NULL,
+                duration INT NULL,
+                inactive_threshold INT DEFAULT 0,
+                FOREIGN KEY (camera_id) REFERENCES cctv(id) ON DELETE CASCADE,
+                FOREIGN KEY (zone_id) REFERENCES zones(id) ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
         app.logger.info("Skema database berhasil diverifikasi dan diperbarui.")
+
     except Exception as e:
         app.logger.error(f"ensure_schema() GAGAL: {e}")
-        if conn: conn.rollback()
+        if conn:
+            conn.rollback()
     finally:
-        if cur: cur.close()
-        if conn: conn.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 def init_camera_data(cams: List[Dict[str, Any]]) -> None:
     all_camera_zones = load_all_zones_from_db()
@@ -328,16 +417,16 @@ def capture_thread_fn(cam_id: int, rtsp_url: str):
         except Exception: pass
     app.logger.info(f"Capture thread stopped for camera {cam_id}")
 
-def format_duration(seconds):
-    if seconds >= 3600:
-        hours = int(seconds / 3600)
-        minutes = int((seconds % 3600) / 60)
-        return f"{hours} jam {minutes} menit"
-    elif seconds >= 60:
-        minutes = int(seconds / 60)
-        return f"{minutes} menit"
+def format_duration(td):
+    if not td:
+        return "-"
+    total_seconds = int(td.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
     else:
-        return f"{int(seconds)} detik"
+        return f"{minutes:02}:{seconds:02}"
 
 def process_detection(frame, cam_id: int):
     global active_sessions
@@ -347,7 +436,10 @@ def process_detection(frame, cam_id: int):
 
         resize_for_det = DETECTION_SIZE
         small = cv2.resize(frame, resize_for_det)
-        results = model.track(small, persist=True, classes=[0], verbose=False, conf=0.25, iou=0.4, max_det=300)
+        results = model.track(
+            small, persist=True, classes=[0],
+            verbose=False, conf=0.25, iou=0.4, max_det=300
+        )
         annotated = frame.copy()
         
         min_duration = MIN_SESSION_DURATIONS.get(cam_id, 10)
@@ -364,7 +456,7 @@ def process_detection(frame, cam_id: int):
 
         if cam_id not in active_sessions:
             active_sessions[cam_id] = {}
-        
+
         current_person_locations = {}
         if results and hasattr(results[0], "boxes") and results[0].boxes is not None:
             for r in results:
@@ -379,16 +471,33 @@ def process_detection(frame, cam_id: int):
                     for zone in zones_for_cam:
                         scaled_zone_points = [[int(x * scale_x), int(y * scale_y)] for x, y in zone['points']]
                         if is_inside_zone((x1, y1, x2, y2), scaled_zone_points):
-                            current_person_locations[tracking_id] = {'zone_id': zone['id'], 'zone_name': zone['name'], 'max_people': zone.get('max_people', 0)}
+                            current_person_locations[tracking_id] = {
+                                'zone_id': zone['id'],
+                                'zone_name': zone['name'],
+                                'max_people': zone.get('max_people', 0)
+                            }
                             break
 
         active_cam_sessions = active_sessions[cam_id]
         current_tracking_ids = set(current_person_locations.keys())
         previous_tracking_ids = set(active_cam_sessions.keys())
 
+        zone_status = "Zona Tidak Aktif"
+        if len(current_tracking_ids) > len(previous_tracking_ids):  
+            zone_status = "Zona Aktif"
+            app.logger.info(f"[CAM {cam_id}] Zona Aktif (orang bertambah)")
+        elif len(current_tracking_ids) < len(previous_tracking_ids):  
+            zone_status = "Zona Tidak Aktif"
+            app.logger.info(f"[CAM {cam_id}] Zona Tidak Aktif (orang berkurang)")
+
         for tid in (current_tracking_ids - previous_tracking_ids):
             zone_info = current_person_locations[tid]
-            active_cam_sessions[tid] = {'start_time': datetime.now(), 'zone_id': zone_info['zone_id'], 'zone_name': zone_info['zone_name'], 'max_people': zone_info.get('max_people', 0)}
+            active_cam_sessions[tid] = {
+                'start_time': datetime.now(),
+                'zone_id': zone_info['zone_id'],
+                'zone_name': zone_info['zone_name'],
+                'max_people': zone_info.get('max_people', 0)
+            }
             app.logger.info(f"Orang masuk zona: cam={cam_id}, tid={tid}, zona={zone_info['zone_name']}")
 
         for tid in (previous_tracking_ids - current_tracking_ids):
@@ -396,77 +505,23 @@ def process_detection(frame, cam_id: int):
             if session_data:
                 duration = (datetime.now() - session_data['start_time']).total_seconds()
                 end_time = datetime.now()
-                
-                start_str = session_data['start_time'].strftime("%Y-%m-%d %H:%M:%S")
-                end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
-                
-                if duration < min_duration:
-                    formatted_duration = format_duration(duration)
-                    formatted_min_duration = format_duration(min_duration)
-                    
-                    notif_msg = (
-                        f"Notifikasi sistem: kamera {cam_id}, {session_data['zone_name']} "
-                        f"seseorang dengan waktu masuk {start_str} "
-                        f"telah keluar dari lokasi dengan waktu keluar {end_str}. "
-                        f"Ini tidak sesuai dengan ketentuan ({formatted_min_duration}) "
-                        f"dengan durasi {formatted_duration}."
-                    )
-                    pending_notifications.append(notif_msg)
-                    send_notification_get(cam_id, notif_msg) 
-
-                session_db_id = save_person_session_start_with_zone(cam_id, tid, session_data['zone_id'], session_data['start_time'])
+                session_db_id = save_person_session_start_with_zone(
+                    cam_id, tid, session_data['zone_id'], session_data['start_time']
+                )
                 if session_db_id:
                     update_person_session_end(session_db_id, int(duration))
-                    app.logger.info(f"Sesi selesai (keluar): cam={cam_id}, tid={tid}, zona={session_data['zone_name']}, durasi={duration:.2f}s")
+                app.logger.info(
+                    f"Sesi selesai (keluar): cam={cam_id}, tid={tid}, zona={session_data['zone_name']}, durasi={duration:.2f}s"
+                )
 
-        for tid in (previous_tracking_ids & current_tracking_ids):
-            session_data = active_cam_sessions[tid]
-            current_zone_info = current_person_locations[tid]
-            
-            if session_data['zone_id'] != current_zone_info['zone_id']:
-                app.logger.info(f"Orang pindah zona: cam={cam_id}, tid={tid}, dari {session_data['zone_name']} ke {current_zone_info['zone_name']}")
-                
-                duration = (datetime.now() - session_data['start_time']).total_seconds()
-                end_time = datetime.now()
-                
-                if duration < min_duration:
-                    start_str = session_data['start_time'].strftime("%Y-%m-%d %H:%M:%S")
-                    end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        # Simpan sesi kosong jika sekarang tidak ada orang sama sekali
+        if len(current_tracking_ids) == 0 and len(previous_tracking_ids) > 0:
+            for zone in zones_for_cam:
+                zone_id = zone['id']
+                save_empty_zone_session(cam_id, zone_id)
+                app.logger.info(f"[CAM {cam_id}] Zona {zone['name']} kosong → simpan sesi kosong ke DB")
 
-                    formatted_duration = format_duration(duration)
-                    formatted_min_duration = format_duration(min_duration)
-
-                    notif_msg = (
-                        f"Notifikasi sistem: kamera, {cam_id} {session_data['zone_name']} "
-                        f"seseorang dengan waktu masuk {start_str} "
-                        f"telah keluar dari lokasi. Dengan waktu keluar {end_str}. "
-                        f"Ini tidak sesuai dengan ketentuan ({formatted_min_duration}) "
-                        f"dengan durasi {formatted_duration}"
-                    )
-                    pending_notifications.append(notif_msg)
-                    send_notification_get(cam_id, notif_msg) 
-
-                session_db_id = save_person_session_start_with_zone(cam_id, tid, session_data['zone_id'], session_data['start_time'])
-                if session_db_id:
-                    update_person_session_end(session_db_id, int(duration))
-
-                active_cam_sessions[tid] = {'start_time': datetime.now(), 'zone_id': current_zone_info['zone_id'], 'zone_name': current_zone_info['zone_name'], 'max_people': current_zone_info.get('max_people', 0)}
-
-        for zone in zones_for_cam:
-            people_in_zone = sum(1 for loc in current_person_locations.values() if loc['zone_id'] == zone['id'])
-            
-            if zone.get('max_people', 0) > 0:
-                if people_in_zone < zone['last_count'] and people_in_zone < zone['max_people']:
-                    notif_msg = (
-                        f"Notifikasi sistem kamera {cam_id} zona {zone['name']} "
-                        f"jumlah orang berkurang dari {zone['last_count']} orang "
-                        f"menjadi {people_in_zone} orang."
-                    )
-                    pending_notifications.append(notif_msg)
-                    send_notification_get(cam_id, notif_msg) # Panggilan Telegram diganti di sini
-                
-            zone['last_count'] = people_in_zone
-
+        # Gambar bounding box orang
         total_people_in_zones = len(current_person_locations)
         if results and hasattr(results[0], "boxes"):
             for r in results:
@@ -484,14 +539,16 @@ def process_detection(frame, cam_id: int):
                     cv2.rectangle(annotated, (ox1, oy1), (ox2, oy2), color, 2)
                     cv2.putText(annotated, text, (ox1, oy1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        status_text = "Orang Terdeteksi" if total_people_in_zones > 0 else "Kosong"
-        display_text = f"Status: {status_text}, Count: {total_people_in_zones}"
-        cv2.putText(annotated, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        # Tampilkan status Zona
+        display_text = f"{zone_status} | Orang: {total_people_in_zones}"
+        cv2.putText(annotated, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
         
-        return annotated, total_people_in_zones, status_text
+        return annotated, total_people_in_zones, zone_status
+
     except Exception as e:
         app.logger.error(f"Error di process_detection camera {cam_id}: {e}", exc_info=True)
         return frame, 0, "Error"
+
 
 def init_writer_if_needed(cam_id: int, frame, fps: float):
     with recording_locks.get(cam_id, threading.Lock()):
@@ -571,6 +628,20 @@ def start_camera_threads():
             if cid in capture_threads: del capture_threads[cid]
             if cid in detect_threads: del detect_threads[cid]
 
+def save_empty_zone_session(cam_id, zone_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        now = datetime.now()
+        cur.execute("""
+            INSERT INTO person_sessions (camera_id, zone_id, start_time, end_time, duration, people_count)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (cam_id, zone_id, now, now, 0, 0))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
 @app.route("/")
 def index():
     cams = load_cameras_from_db()
@@ -583,91 +654,134 @@ def video_feed(camera_id: int):
 
 @app.route("/events_json")
 def events_json():
-    global pending_notifications
     try:
+        # Ambil riwayat sesi dari DB
         events_db = get_person_sessions_with_zones(limit=50)
         out = []
+
+        # Ambil data kamera
         all_cams = {c['id']: c for c in load_cameras_from_db()}
-        
+
+        # Tambahkan jumlah orang ke sesi aktif
         for cam_id, sessions in active_sessions.items():
             current_count = people_count.get(cam_id, 0)
             for tid, session_data in sessions.items():
                 session_data['people_count'] = current_count
 
-        sessions_to_remove = []
+        # Dapatkan semua zona yang sedang aktif
+        active_zones_current = set()
+        for cam_id, sessions in active_sessions.items():
+            for tid, s in sessions.items():
+                zid = s.get('zone_id')
+                if zid is not None:
+                    active_zones_current.add((cam_id, zid))
+
+        # Ambil sesi terakhir per zona dari DB
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("""
+                SELECT ps.camera_id, ps.zone_id, MAX(ps.end_time) AS last_end
+                FROM person_sessions ps
+                GROUP BY ps.camera_id, ps.zone_id
+            """)
+            last_sessions = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+
+        # Buat peta last_end untuk menghitung durasi tidak aktif
+        last_end_map = {
+            (ls["camera_id"], ls["zone_id"]): ls["last_end"]
+            for ls in (last_sessions or [])
+            if ls.get("last_end") is not None
+        }
+
+        now = datetime.now()
+
+        # Tambahkan sesi aktif ke daftar output
         for cam_id, sessions in active_sessions.items():
             camera_name = all_cams.get(cam_id, {}).get('name', f"Camera {cam_id}")
             for tid, session_data in sessions.items():
-                notification_message = ""
-                
-                current_people_count = session_data.get('people_count', 0)
-                zone_max_people = session_data.get('max_people', 0)
-                
-                if zone_max_people > 0 and current_people_count < zone_max_people:
-                    notification_message += f"Jumlah orang di zona '{session_data.get('zone_name')}' ({current_people_count}) berkurang dari batas maksimal ({zone_max_people})."
-
-                if session_data.get('status') == 'ended' and session_data.get('notification_sent') is not True:
-                    min_duration = all_cams.get(cam_id, {}).get('min_session_duration', 0)
-                    
-                    if session_data.get('duration') < min_duration:
-                    
-                        if notification_message:
-                            notification_message += " dan "
-                        notification_message += f"Seseorang keluar dari zona '{session_data.get('zone_name')}' di '{camera_name}'. Dengan Durasi sesi: {int(session_data.get('duration', 0))} kurang dari batas {min_duration}"
-                    
-                    if notification_message:
-                        pending_notifications.append(notification_message)
-                        session_data['notification_sent'] = True
-                    
-                    sessions_to_remove.append((cam_id, tid))
-
-                start_time = session_data['start_time']
-                duration = (datetime.now() - start_time).total_seconds()
-
+                start_time = session_data.get('start_time')
+                if not start_time:
+                    continue
+                sec = max(1, int((now - start_time).total_seconds()))
+                duration_str = format_duration(timedelta(seconds=sec))
                 out.append({
-                    "id": f"active_{cam_id}_{tid}", "camera_id": cam_id,
+                    "id": f"active_{cam_id}_{tid}",
+                    "camera_id": cam_id,
                     "camera_name": camera_name,
                     "zone_name": session_data.get('zone_name', 'N/A'),
                     "start_time": start_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "end_time": "Sesi Aktif",
-                    "duration": f"{int(duration)}s",
-                    "people_count": current_people_count,
-                    "notification": notification_message
+                    "duration": duration_str,
+                    "inactive_duration": "-",
+                    "people_count": session_data.get('people_count', 0),
+                    "notification": session_data.get('notification', "")
                 })
-        
+
+        # Tambahkan notifikasi tertunda ke daftar output
         while pending_notifications:
             message = pending_notifications.popleft()
             out.append({
                 "id": f"pending_{datetime.now().timestamp()}",
-                "camera_id": 0, "camera_name": "N/A", "zone_name": "N/A",
+                "camera_id": 0,
+                "camera_name": "N/A",
+                "zone_name": "N/A",
                 "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "end_time": "N/A", "duration": "N/A", "people_count": 0,
+                "end_time": "N/A",
+                "duration": "N/A",
+                "inactive_duration": "N/A",
+                "people_count": 0,
                 "notification": message
             })
-        
-        for cam_id, tid in sessions_to_remove:
-            if tid in active_sessions[cam_id]:
-                del active_sessions[cam_id][tid]
-        
+
+        # Tambahkan sesi yang sudah selesai ke daftar output
         for e in events_db:
-            camera_name = all_cams.get(e.get("camera_id"), {}).get('name', 'N/A')
-            duration_formatted = str(timedelta(seconds=e['duration'])) if e['duration'] is not None else "N/A"
+            cam_id = e.get("camera_id")
+            zone_id = e.get("zone_id")
+            camera_name = all_cams.get(cam_id, {}).get('name', 'N/A')
+
+            # Durasi sesi
+            if e.get("duration") is not None:
+                duration_str = format_duration(timedelta(seconds=int(e["duration"])))
+            else:
+                duration_str = "N/A"
+
+            # Hitung durasi tidak aktif (jika zona sedang kosong)
+            inactive_duration = "-"
+            e_end = e.get("end_time")
+            if e_end:
+                last_end = last_end_map.get((cam_id, zone_id))
+                if last_end and last_end == e_end:
+                    if (cam_id, zone_id) not in active_zones_current:
+                        diff_seconds = max(1, int((now - e_end).total_seconds()))
+                        inactive_duration = format_duration(timedelta(seconds=diff_seconds))
+                    else:
+                        inactive_duration = "-"
+
             out.append({
-                "id": e.get("id"), "camera_id": e.get("camera_id"),
+                "id": e.get("id"),
+                "camera_id": cam_id,
                 "camera_name": camera_name,
-                "zone_name": e.get("zone_name", "Tanpa Zona"),
+                "zone_name": e.get("zone_name", "Tanpa Zona") if e.get("zone_id") else "Tanpa Zona",
                 "start_time": e.get("start_time").strftime("%Y-%m-%d %H:%M:%S") if e.get("start_time") else "N/A",
-                "end_time": e.get("end_time").strftime("%Y-%m-%d %H:%M:%S") if e.get("end_time") else "N/A",
-                "duration": duration_formatted,
+                "end_time": e_end.strftime("%Y-%m-%d %H:%M:%S") if e_end else "N/A",
+                "duration": duration_str,
+                "inactive_duration": inactive_duration,
                 "people_count": e.get("people_count", 0),
                 "notification": ""
             })
 
-        out.sort(key=lambda x: x['start_time'], reverse=True)
+        # Urutkan terbaru dulu berdasarkan start_time
+        out.sort(key=lambda x: x.get('start_time', ''), reverse=True)
         return jsonify(out)
-    except Exception as e:
-        app.logger.error(f"Gagal ambil events_json: {e}", exc_info=True)
+
+    except Exception as ex:
+        app.logger.error(f"Gagal ambil events_json: {ex}", exc_info=True)
         return jsonify([]), 500
+
 
 @app.route("/add_camera", methods=["GET", "POST"])
 def add_camera():
@@ -694,30 +808,30 @@ def add_camera():
         return redirect(url_for("index"))
     return render_template("add_camera.html")
 
-@app.route("/edit_zone/<int:camera_id>")
+@app.route("/edit-zone/<int:camera_id>", methods=["GET", "POST"])
 def edit_zone(camera_id):
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT id, name, min_session_duration FROM cctv WHERE id = %s", (camera_id,))
-        camera = cursor.fetchone()
-        if not camera: return "Kamera tidak ditemukan", 404
-        cursor.execute("SELECT id, zone_name, coordinates, max_people FROM zones WHERE camera_id = %s", (camera_id,))
-        zones_db = cursor.fetchall()
-        zones = []
-        for z in zones_db:
-            try:
-                z['name'] = z.pop('zone_name')
-                z['coordinates_str'] = z['coordinates']
-                z['coordinates'] = ast.literal_eval(z['coordinates'])
-                zones.append(z)
-            except:
-                z['coordinates'] = []
-                zones.append(z)
-    finally:
-        cursor.close()
-        conn.close()
-    return render_template("edit_zone.html", camera=camera, zones=zones)
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("SELECT * FROM person_sessions WHERE id = %s", (camera_id,))
+    camera = cur.fetchone()
+
+    cur.execute("SELECT * FROM zones WHERE camera_id = %s", (camera_id,))
+    zones = cur.fetchall()
+
+    cur.execute("SELECT inactive_threshold FROM empty_zone_sessions WHERE camera_id = %s LIMIT 1", (camera_id,))
+    empty_session = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "edit_zone.html",
+        camera=camera,
+        zones=zones,
+        empty_session=empty_session,   # <-- kirim ke template
+    )
+
 
 @app.route("/delete_zone_new/<int:zone_id>", methods=["POST"])
 def delete_zone_new(zone_id):
@@ -749,11 +863,29 @@ def person_count_route(camera_id: int):
 def download_events():
     try:
         export_path = os.path.join(EXPORTS_DIR, "sessions.xlsx")
-        export_sessions_to_excel(export_path)
+        
+        # Ekspor ke 2 sheet dalam 1 file
+        import pandas as pd
+        from database import get_person_sessions, get_empty_zone_sessions
+
+        # Ambil data dari DB
+        person_sessions = get_person_sessions(limit=1000)
+        empty_zone_sessions = get_empty_zone_sessions(limit=1000)
+
+        # Buat DataFrame
+        df_person = pd.DataFrame(person_sessions)
+        df_empty = pd.DataFrame(empty_zone_sessions)
+
+        # Simpan ke Excel (2 sheet)
+        with pd.ExcelWriter(export_path) as writer:
+            df_person.to_excel(writer, sheet_name="Person Sessions", index=False)
+            df_empty.to_excel(writer, sheet_name="Empty Zone Sessions", index=False)
+
         return send_file(export_path, as_attachment=True)
     except Exception as e:
         app.logger.error(f"Gagal download sessions: {e}")
         return "Gagal download sessions", 500
+
 
 @app.route("/toggle_record/<int:camera_id>", methods=["POST"])
 def toggle_record(camera_id: int):

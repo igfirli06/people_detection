@@ -331,26 +331,28 @@
         </div>
         {% endfor %}
     </div>
+
     <div class="log-wrapper">
         <h2>Riwayat Sesi</h2>
         <table>
             <thead>
                 <tr>
                     <th>Kamera</th>
-                    <th>Zona</th>
+                    <th>Nama Zona</th>
                     <th>Waktu Masuk</th>
                     <th>Waktu Keluar</th>
-                    <th>Durasi</th>
+                    <th>Zona Aktif</th>
+                    <th>Zona Tidak Aktif</th>
                 </tr>
             </thead>
-            <tbody id="events-body">
-                </tbody>
+            <tbody id="events-body"></tbody>
         </table>
         <div style="text-align: center;">
             <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
         </div>
     </div>
 </main>
+
 <footer>
     <p>"Tidak ada kata tak mungkin, semuanya hanya butuh device yang layak."</p>
     <p>igfirliiaziiza@gmail.com</p>
@@ -363,6 +365,7 @@
 
 <script>
     const cameras = {{ cameras|tojson }};
+
     function updatePeopleCount(cameraId) {
         fetch(`/person_count/${cameraId}`)
             .then(res => res.json())
@@ -374,34 +377,34 @@
             })
             .catch(err => console.error("Error updating people count:", err));
     }
+
     function updateEventLog() {
-        fetch("/events_json")
-            .then(res => res.json())
+        fetch('/events_json')
+            .then(response => response.json())
             .then(data => {
-                const tableBody = document.getElementById("events-body");
-                let htmlContent = '';
-                if (data.length === 0) {
-                    htmlContent = `<tr><td colspan="5" class="no-data">Belum ada data sesi</td></tr>`;
-                } else {
-                    data.forEach(event => {
-                        const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
-                        const endTimeText = event.end_time !== 'Sesi Aktif' && event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
-                        const zoneNameText = event.zone_name || '<span style="color: #7f8c8d;">Tanpa Zona</span>';
-                        
-                        htmlContent += `
-                            <tr>
-                                <td>${event.camera_name}</td>
-                                <td>${zoneNameText}</td>
-                                <td>${event.start_time}</td>
-                                <td>${endTimeText}</td>
-                                <td>${durationText}</td>
-                            </tr>
-                        `;
-                    });
-                }
-                tableBody.innerHTML = htmlContent;
+                const tableBody = document.getElementById('events-body');
+                tableBody.innerHTML = '';
+
+                data.forEach(event => {
+                    const row = document.createElement('tr');
+
+                    const inactiveText = event.inactive_duration && event.inactive_duration !== "-"
+                        ? event.inactive_duration
+                        : '<span style="color: red; font-weight: bold;">Tidak Aktif</span>';
+
+                    row.innerHTML = `
+                        <td>${event.camera_name}</td>
+                        <td>${event.zone_name}</td>
+                        <td>${event.start_time}</td>
+                        <td>${event.end_time}</td>
+                        <td>${event.duration}</td>
+                        <td>${inactiveText}</td>
+                    `;
+
+                    tableBody.appendChild(row);
+                });
             })
-            .catch(err => console.error("Error updating event log:", err));
+            .catch(err => console.error("Error updateEventLog:", err));
     }
 
     function startUpdatingAll() {
@@ -412,6 +415,7 @@
         updateEventLog();
         setInterval(updateEventLog, 1000);
     }
+
     window.onload = startUpdatingAll;
 </script>
 

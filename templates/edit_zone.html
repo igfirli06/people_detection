@@ -15,377 +15,220 @@
             --text-secondary: #7F8C8D;
             --border-color: #EAECEE;
             --success-color: #2ECC71;
-            --success-hover: #27AE60;
             --danger-color: #E74C3C;
-            --danger-hover: #C0392B;
-            --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
         }
         body {
             font-family: 'Poppins', sans-serif;
             background-color: var(--background-light);
             color: var(--text-main);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
+            margin: 0; padding: 20px;
+            display: flex; justify-content: center; align-items: flex-start;
             min-height: 100vh;
         }
         .container {
             background-color: var(--surface-card);
             padding: 40px;
             border-radius: 12px;
-            box-shadow: var(--shadow-light);
-            text-align: center;
-            width: 95%;
-            max-width: 800px;
-            box-sizing: border-box;
-            transition: box-shadow 0.3s ease;
-            margin-top: 20px;
-            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            width: 95%; max-width: 800px;
         }
-        .container:hover {
-            box-shadow: var(--shadow-hover);
-        }
-        h1, h3 {
-            color: var(--primary-color);
-            margin-bottom: 25px;
-            font-weight: 600;
-        }
-        h1 { font-size: 1.8rem; }
-        h3 { font-size: 1.4rem; margin-top: 40px;}
-
-        .image-container {
-            position: relative;
-            width: 100%;
-            margin-bottom: 20px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .image-container img {
-            width: 100%;
-            display: block;
-        }
-        .canvas-overlay {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            cursor: crosshair;
-        }
+        h1, h3 { color: var(--primary-color); text-align: center; }
+        .image-container { position: relative; width: 100%; margin-bottom: 20px; }
+        .image-container img { width: 100%; display: block; }
+        .canvas-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
         #coords-display {
-            margin-top: 20px;
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            background-color: #F8F9FA;
-            padding: 10px 15px;
-            border-radius: 6px;
+            margin-top: 20px; font-size: 0.9rem; color: var(--text-secondary);
+            background-color: #F8F9FA; padding: 10px 15px; border-radius: 6px;
             border: 1px solid var(--border-color);
-            word-wrap: break-word;
-            min-height: 20px;
         }
-        .button-group {
-            margin-top: 30px;
-            display: flex;
-            justify-content: center;
-            gap: 15px;
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; }
+        .form-control {
+            width: 100%; padding: 12px; border: 1px solid var(--border-color);
+            border-radius: 8px; font-size: 1rem;
+        }
+        .time-inputs { display: flex; gap: 15px; }
+        .time-input-group { flex: 1; }
+        .zone-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px; background-color: #F8F9FA; margin-bottom: 10px;
+            border: 1px solid var(--border-color); border-radius: 8px;
         }
         .btn {
-            padding: 14px 30px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-            font-weight: 600;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            padding: 12px 20px; border: none; border-radius: 8px;
+            cursor: pointer; font-size: 1rem; font-weight: 600;
         }
-        .btn-save {
-            background: linear-gradient(135deg, var(--success-color), #28B463);
-            color: white;
-            box-shadow: 0 4px 10px rgba(46, 204, 113, 0.3);
-        }
-        .btn-save:hover {
-            background: linear-gradient(135deg, var(--success-hover), #229954);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(46, 204, 113, 0.4);
-        }
-        .btn-danger {
-            background: linear-gradient(135deg, var(--danger-color), #CB4335);
-            color: white;
-            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
-        }
-        .btn-danger:hover {
-            background: linear-gradient(135deg, var(--danger-hover), #A93226);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(231, 76, 60, 0.4);
-        }
-        .form-group {
-            margin-bottom: 20px;
-            text-align: left;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-        .form-control {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            box-sizing: border-box;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
-        }
-        .form-control:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
-        }
-        hr {
-            border: none;
-            border-top: 1px solid var(--border-color);
-            margin: 40px 0;
-        }
-        .time-inputs { display: flex; gap: 15px; justify-content: space-between; }
-        .time-inputs .time-input-group { flex: 1; }
-        .time-input-group input { text-align: center; }
-
-        #zone-list {
-            margin-top: 20px;
-            text-align: left;
-        }
-        .zone-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px;
-            background-color: #F8F9FA;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 10px;
-        }
-        .zone-item span {
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
+        .btn-save { background: var(--success-color); color: white; }
+        .btn-danger { background: var(--danger-color); color: white; }
         .btn-delete-small {
-            padding: 6px 12px;
-            font-size: 0.8rem;
-            background-color: var(--danger-color);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.2s;
+            padding: 6px 12px; font-size: 0.8rem;
+            background: var(--danger-color); color: white;
+            border: none; border-radius: 5px;
         }
-        .btn-delete-small:hover {
-            background-color: var(--danger-hover);
+        .back-link {
+            display: inline-block; margin-top: 10px;
+            color: var(--primary-color); font-weight: 600;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Pengaturan Zona untuk <br/>{{ camera.name }}</h1>
+<div class="container">
+    <h1>Pengaturan Zona untuk <br/>{{ camera.name }}</h1>
 
-        <h3>Daftar Zona Tersimpan</h3>
-        <div id="zone-list">
-            {% for zone in zones %}
-            <div class="zone-item">
-                <span>{{ zone.name }} (Max: {{ zone.max_people }})</span>
-                <form method="POST" action="{{ url_for('delete_zone_new', zone_id=zone.id) }}" onsubmit="return confirm('Apakah Anda yakin ingin menghapus zona \'{{ zone.name }}\'?');">
-                    <button type="submit" class="btn-delete-small">Hapus</button>
-                </form>
-            </div>
-            {% else %}
-            <p style="color: var(--text-secondary);">Belum ada zona yang disimpan untuk kamera ini.</p>
-            {% endfor %}
+    <h3>Daftar Zona Tersimpan</h3>
+    <div id="zone-list">
+        {% for zone in zones %}
+        <div class="zone-item">
+            <span>{{ zone.name }} (Max: {{ zone.max_people }})</span>
+            <form method="POST" action="{{ url_for('delete_zone_new', zone_id=zone.id) }}" onsubmit="return confirm('Hapus zona {{ zone.name }}?');">
+                <button type="submit" class="btn-delete-small">Hapus</button>
+            </form>
         </div>
-
-        <hr>
-        
-        <form id="combined-form" method="POST" action="{{ url_for('save_camera_settings', camera_id=camera.id) }}">
-            
-            <h3>Gambar Zona Baru</h3>
-            <div class="image-container">
-                <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
-                <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
-            </div>
-            <div id="coords-display">
-                Koordinat Baru: <span id="coordinates">[]</span>
-            </div>
-
-            <div class="form-group" style="margin-top: 20px;">
-                <label for="zone_name">Nama Zona Baru</label>
-                <input type="text" id="zone_name" name="zone_name" class="form-control" placeholder="Contoh: Pintu Masuk">
-            </div>
-
-            <div class="form-group">
-                <label for="zone_max_people">Maksimal Jumlah Orang untuk Zona Ini</label>
-                <input type="number" id="zone_max_people" name="zone_max_people" class="form-control" value="0" min="0" required>
-            </div>
-
-            <input type="hidden" name="zone_coordinates" id="zone-input">
-            <div class="button-group">
-                <button type="button" id="reset-drawing-btn" class="btn btn-danger">Reset Gambar</button>
-            </div>
-
-            <hr>
-
-            <h3>Pengaturan Lain</h3>
-            <div class="form-group">
-                <label>Durasi Sesi Minimal</label>
-                {% set total_seconds = camera.min_session_duration|int %}
-                {% set hours = (total_seconds // 3600) %}
-                {% set minutes = (total_seconds % 3600) // 60 %}
-                {% set seconds = total_seconds % 60 %}
-                <div class="time-inputs">
-                    <div class="time-input-group">
-                        <label for="min_duration_hours">Jam</label>
-                        <input type="number" id="min_duration_hours" name="min_duration_hours" class="form-control" value="{{ hours }}" min="0">
-                    </div>
-                    <div class="time-input-group">
-                        <label for="min_duration_minutes">Menit</label>
-                        <input type="number" id="min_duration_minutes" name="min_duration_minutes" class="form-control" value="{{ minutes }}" min="0" max="59">
-                    </div>
-                    <div class="time-input-group">
-                        <label for="min_duration_seconds">Detik</label>
-                        <input type="number" id="min_duration_seconds" name="min_duration_seconds" class="form-control" value="{{ seconds }}" min="0" max="59">
-                    </div>
-                </div>
-            </div>
-
-            <div class="button-group">
-                <button type="submit" class="btn btn-save">Simpan Pengaturan</button>
-            </div>
-        </form>
-        
-        <p><a href="{{ url_for('index') }}" style="color: var(--primary-color); text-decoration: none; font-weight: 600; margin-top: 30px; display: inline-block;">&larr; Kembali ke Halaman Utama</a></p>
+        {% else %}
+        <p style="color: var(--text-secondary);">Belum ada zona.</p>
+        {% endfor %}
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const canvas = document.getElementById('drawing-canvas');
-            const videoFeed = document.getElementById('video-feed');
-            const coordsDisplay = document.getElementById('coordinates');
-            const zoneInput = document.getElementById('zone-input');
-            const combinedForm = document.getElementById('combined-form');
-            const resetBtn = document.getElementById('reset-drawing-btn');
-            const zoneNameInput = document.getElementById('zone_name');
-            const zoneMaxPeopleInput = document.getElementById('zone_max_people'); // Ambil input baru
-            const ctx = canvas.getContext('2d');
-            const existingZones = {{ zones|tojson }};
-            let newPoints = [];
+    <hr>
+    <form id="combined-form" method="POST" action="{{ url_for('save_camera_settings', camera_id=camera.id) }}">
+        <h3>Gambar Zona Baru</h3>
+        <div class="image-container">
+            <img id="video-feed" src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="Video Feed">
+            <canvas id="drawing-canvas" class="canvas-overlay"></canvas>
+        </div>
+        <div id="coords-display">Koordinat Baru: <span id="coordinates">[]</span></div>
 
-            function resizeCanvas() {
-                canvas.width = videoFeed.naturalWidth || videoFeed.offsetWidth;
-                canvas.height = videoFeed.naturalHeight || videoFeed.offsetHeight;
-                canvas.style.width = videoFeed.offsetWidth + 'px';
-                canvas.style.height = videoFeed.offsetHeight + 'px';
-                redraw();
-            }
+        <div class="form-group">
+            <label for="zone_name">Nama Zona Baru</label>
+            <input type="text" id="zone_name" name="zone_name" class="form-control">
+        </div>
 
-            function redraw() {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.lineWidth = 3;
-                ctx.font = "bold 20px Poppins";
-                
-                existingZones.forEach(zone => {
-                    if (zone.coordinates.length > 1) {
-                        ctx.strokeStyle = '#7f8c8d'; 
-                        ctx.fillStyle = '#7f8c8d';
-                        ctx.beginPath();
-                        ctx.moveTo(zone.coordinates[0][0], zone.coordinates[0][1]);
-                        for (let i = 1; i < zone.coordinates.length; i++) {
-                            ctx.lineTo(zone.coordinates[i][0], zone.coordinates[i][1]);
-                        }
-                        if (zone.coordinates.length > 2) {
-                            ctx.closePath();
-                        }
-                        ctx.stroke();
-                        // Tampilkan nama zona dan jumlah orang
-                        const maxPeopleText = zone.max_people > 0 ? ` (Max: ${zone.max_people})` : '';
-                        ctx.fillText(`${zone.name}${maxPeopleText}`, zone.coordinates[0][0] + 10, zone.coordinates[0][1] - 10);
-                    }
-                });
+        <div class="form-group">
+            <label for="zone_max_people">Minimal Jumlah Orang</label>
+            <input type="number" id="zone_max_people" name="zone_max_people" class="form-control" value="0" min="0">
+        </div>
 
-                if (newPoints.length > 1) {
-                    ctx.strokeStyle = '#FFFF00';
-                    ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    ctx.moveTo(newPoints[0][0], newPoints[0][1]);
-                    for (let i = 1; i < newPoints.length; i++) {
-                        ctx.lineTo(newPoints[i][0], newPoints[i][1]);
-                    }
-                    if (newPoints.length > 2) {
-                        ctx.closePath();
-                    }
-                    ctx.stroke();
+        <input type="hidden" name="zone_coordinates" id="zone-input">
+
+        <div class="form-group">
+            <label>Durasi Sesi Minimal Dalam Zona</label>
+            {% set total_seconds = camera.min_session_duration|int %}
+            {% set hours = (total_seconds // 3600) %}
+            {% set minutes = (total_seconds % 3600) // 60 %}
+            {% set seconds = total_seconds % 60 %}
+            <div class="time-inputs">
+                <div class="time-input-group">
+                    <label>Jam</label>
+                    <input type="number" id="min_duration_hours" class="form-control" value="{{ hours }}">
+                </div>
+                <div class="time-input-group">
+                    <label>Menit</label>
+                    <input type="number" id="min_duration_minutes" class="form-control" value="{{ minutes }}">
+                </div>
+                <div class="time-input-group">
+                    <label>Detik</label>
+                    <input type="number" id="min_duration_seconds" class="form-control" value="{{ seconds }}">
+                </div>
+            </div>
+            <input type="hidden" name="min_session_duration" id="min_session_duration">
+        </div>
+
+        <div class="form-group">
+            <label>Batas Zona Tidak Aktif</label>
+            {% set inactive_total = camera.inactive_threshold|default(0)|int %}
+            {% set inactive_hours = (inactive_total // 3600) %}
+            {% set inactive_minutes = (inactive_total % 3600) // 60 %}
+            {% set inactive_seconds = inactive_total % 60 %}
+            <div class="time-inputs">
+                <div class="time-input-group">
+                    <label>Jam</label>
+                    <input type="number" id="inactive_hours" class="form-control" value="{{ inactive_hours }}">
+                </div>
+                <div class="time-input-group">
+                    <label>Menit</label>
+                    <input type="number" id="inactive_minutes" class="form-control" value="{{ inactive_minutes }}">
+                </div>
+                <div class="time-input-group">
+                    <label>Detik</label>
+                    <input type="number" id="inactive_seconds" class="form-control" value="{{ inactive_seconds }}">
+                </div>
+            </div>
+            <input type="hidden" name="zone_inactive_limit" id="zone_inactive_limit">
+        </div>
+
+        <div class="button-group" style="text-align:center;">
+            <button type="submit" class="btn btn-save">Simpan Pengaturan</button>
+            <a href="{{ url_for('index') }}" class="back-link">&larr; Kembali</a>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('drawing-canvas');
+    const videoFeed = document.getElementById('video-feed');
+    const coordsDisplay = document.getElementById('coordinates');
+    const zoneInput = document.getElementById('zone-input');
+    const form = document.getElementById('combined-form');
+    const ctx = canvas.getContext('2d');
+    const existingZones = {{ zones|tojson }};
+    let newPoints = [];
+
+    function resizeCanvas() {
+        canvas.width = videoFeed.naturalWidth || videoFeed.offsetWidth;
+        canvas.height = videoFeed.naturalHeight || videoFeed.offsetHeight;
+        redraw();
+    }
+
+    function redraw() {
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        existingZones.forEach(zone=>{
+            if(zone.coordinates.length>1){
+                ctx.strokeStyle='#7f8c8d'; ctx.lineWidth=3;
+                ctx.beginPath();
+                ctx.moveTo(zone.coordinates[0][0], zone.coordinates[0][1]);
+                for(let i=1;i<zone.coordinates.length;i++){
+                    ctx.lineTo(zone.coordinates[i][0], zone.coordinates[i][1]);
                 }
-            }
-
-            canvas.addEventListener('click', function(event) {
-                const rect = canvas.getBoundingClientRect();
-                const x = event.clientX - rect.left;
-                const y = event.clientY - rect.top;
-                
-                const naturalWidth = videoFeed.naturalWidth;
-                const naturalHeight = videoFeed.naturalHeight;
-                if (!naturalWidth || !naturalHeight) return;
-
-                const scaledX = Math.round((x / rect.width) * naturalWidth);
-                const scaledY = Math.round((y / rect.height) * naturalHeight);
-                
-                newPoints.push([scaledX, scaledY]);
-                
-                coordsDisplay.textContent = JSON.stringify(newPoints);
-                zoneInput.value = JSON.stringify(newPoints);
-                
-                redraw();
-            });
-            
-            resetBtn.addEventListener('click', function() {
-                newPoints = [];
-                coordsDisplay.textContent = '[]';
-                zoneInput.value = '[]';
-                zoneNameInput.value = '';
-                zoneMaxPeopleInput.value = '0'; 
-                redraw();
-            });
-
-            combinedForm.addEventListener('submit', function(event) {
-                if (newPoints.length > 0) {
-                    if (newPoints.length < 3) {
-                        event.preventDefault();
-                        alert("Zona baru harus memiliki minimal 3 titik.");
-                        return;
-                    }
-                    if (zoneNameInput.value.trim() === '') {
-                        event.preventDefault();
-                        alert("Nama zona baru tidak boleh kosong.");
-                        zoneNameInput.focus();
-                        return;
-                    }
-                    if (zoneMaxPeopleInput.value.trim() === '' || isNaN(zoneMaxPeopleInput.value)) {
-                         event.preventDefault();
-                         alert("Maksimal jumlah orang untuk zona baru harus diisi dengan angka.");
-                         zoneMaxPeopleInput.focus();
-                         return;
-                    }
-                }
-            });
-
-            videoFeed.onload = function() {
-                resizeCanvas();
-            };
-
-            window.addEventListener('resize', resizeCanvas);
-
-            if (videoFeed.complete) {
-                videoFeed.onload();
+                ctx.stroke();
             }
         });
-    </script>
+        if(newPoints.length>1){
+            ctx.strokeStyle='#FFFF00'; ctx.lineWidth=4;
+            ctx.beginPath();
+            ctx.moveTo(newPoints[0][0], newPoints[0][1]);
+            for(let i=1;i<newPoints.length;i++) ctx.lineTo(newPoints[i][0], newPoints[i][1]);
+            ctx.stroke();
+        }
+    }
+
+    canvas.addEventListener('click', e=>{
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const scaledX = Math.round((x/rect.width) * videoFeed.naturalWidth);
+        const scaledY = Math.round((y/rect.height) * videoFeed.naturalHeight);
+        newPoints.push([scaledX,scaledY]);
+        coordsDisplay.textContent = JSON.stringify(newPoints);
+        zoneInput.value = JSON.stringify(newPoints);
+        redraw();
+    });
+
+    form.addEventListener('submit', e=>{
+        const h=+document.getElementById('min_duration_hours').value||0;
+        const m=+document.getElementById('min_duration_minutes').value||0;
+        const s=+document.getElementById('min_duration_seconds').value||0;
+        document.getElementById('min_session_duration').value = (h*3600)+(m*60)+s;
+
+        const ih=+document.getElementById('inactive_hours').value||0;
+        const im=+document.getElementById('inactive_minutes').value||0;
+        const is=+document.getElementById('inactive_seconds').value||0;
+        document.getElementById('zone_inactive_limit').value = (ih*3600)+(im*60)+is;
+    });
+
+    videoFeed.onload = resizeCanvas;
+    if(videoFeed.complete) resizeCanvas();
+});
+</script>
 </body>
 </html>
