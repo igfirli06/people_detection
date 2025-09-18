@@ -286,6 +286,25 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Toast CSS */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 16px;
+            position: fixed;
+            z-index: 1000;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%);
+            font-size: 1rem;
+            opacity: 0;
+            transition: opacity 0.5s, bottom 0.5s;
+        }
     </style>
 </head>
 <body>
@@ -314,7 +333,7 @@
                         {% if recording_status.get(cam.id) %} Stop Recording {% else %} Start Recording {% endif %}
                     </button>
                 </form>
-                <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Apakah Anda yakin ingin menghapus kamera ini?');">
+                <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;">
                     <button type="submit" class="btn btn-delete">Hapus Kamera</button>
                 </form>
             </div>
@@ -338,14 +357,14 @@
             <thead>
                 <tr>
                     <th>Kamera</th>
-                    <th>Nama Zona</th>
+                    <th>Zona</th>
                     <th>Waktu Masuk</th>
                     <th>Waktu Keluar</th>
-                    <th>Zona Aktif</th>
-                    <th>Zona Tidak Aktif</th>
+                    <th>Durasi</th>
                 </tr>
             </thead>
-            <tbody id="events-body"></tbody>
+            <tbody id="events-body">
+            </tbody>
         </table>
         <div style="text-align: center;">
             <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
@@ -363,61 +382,131 @@
     <p>Copyright © 2025 All for PT. Kutai Timber Indonesia</p>
 </footer>
 
+<!-- Toast -->
+<div id="toast"></div>
+
 <script>
-    const cameras = {{ cameras|tojson }};
+function showToast(message, duration = 3000) {
+    const toast = document.getElementById('toast');
+    toast.innerText = message;
+    toast.style.visibility = 'visible';
+    toast.style.opacity = '1';
+    toast.style.bottom = '50px';
 
-    function updatePeopleCount(cameraId) {
-        fetch(`/person_count/${cameraId}`)
-            .then(res => res.json())
-            .then(data => {
-                const countElement = document.getElementById(`people-count-${cameraId}`);
-                if (countElement) {
-                    countElement.innerText = data.count;
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.bottom = '30px';
+        setTimeout(() => {
+            toast.style.visibility = 'hidden';
+        }, 500);
+    }, duration);
+}
+
+const cameras = {{ cameras|tojson }};
+const previousCounts = {};  // untuk track jumlah orang sebelumnya
+
+function updatePeopleCount(cameraId) {
+    fetch(`/person_count/${cameraId}`)
+        .then(res => res.json())
+        .then(data => {
+            const countElement = document.getElementById(`people-count-${cameraId}`);
+            if (countElement) {
+                const prevCount = previousCounts[cameraId] || 0;
+                countElement.innerText = data.count;
+
+                // Toast masuk/keluar orang
+                if (data.count > prevCount) {
+                    showToast(`Orang masuk di Kamera ${cameraId}: ${data.count}`);
+                } else if (data.count < prevCount) {
+                    showToast(`Orang keluar di Kamera ${cameraId}: ${data.count}`);
                 }
-            })
-            .catch(err => console.error("Error updating people count:", err));
-    }
+                previousCounts[cameraId] = data.count;
+            }
+        })
+        .catch(err => console.error("Error updating people count:", err));
+}
 
-    function updateEventLog() {
-        fetch('/events_json')
-            .then(response => response.json())
-            .then(data => {
-                const tableBody = document.getElementById('events-body');
-                tableBody.innerHTML = '';
-
+function updateEventLog() {
+    fetch("/events_json")
+        .then(res => res.json())
+        .then(data => {
+            const tableBody = document.getElementById("events-body");
+            let htmlContent = '';
+            if (!data || data.length === 0) {
+                htmlContent = `<tr><td colspan="5" class="no-data">Belum ada data sesi</td></tr>`;
+            } else {
                 data.forEach(event => {
-                    const row = document.createElement('tr');
+                    const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
+                    const endTimeText = event.end_time !== 'Sesi Aktif' && event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
+                    const zoneNameText = event.zone_name || '<span style="color: #7f8c8d;">Tanpa Zona</span>';
 
-                    const inactiveText = event.inactive_duration && event.inactive_duration !== "-"
-                        ? event.inactive_duration
-                        : '<span style="color: red; font-weight: bold;">Tidak Aktif</span>';
-
-                    row.innerHTML = `
-                        <td>${event.camera_name}</td>
-                        <td>${event.zone_name}</td>
-                        <td>${event.start_time}</td>
-                        <td>${event.end_time}</td>
-                        <td>${event.duration}</td>
-                        <td>${inactiveText}</td>
-                    `;
-
-                    tableBody.appendChild(row);
+                    htmlContent += `
+                        <tr>
+                            <td>${event.camera_name}</td>
+                            <td>${zoneNameText}</td>
+                            <td>${event.start_time}</td>
+                            <td>${endTimeText}</td>
+                            <td>${durationText}</td>
+                        </tr>`;
                 });
-            })
-            .catch(err => console.error("Error updateEventLog:", err));
-    }
+            }
+            tableBody.innerHTML = htmlContent;
+        })
+        .catch(err => console.error("Error updating event log:", err));
+}
 
-    function startUpdatingAll() {
-        cameras.forEach(cam => {
-            updatePeopleCount(cam.id);
-            setInterval(() => updatePeopleCount(cam.id), 2000);
+function startUpdatingAll() {
+    cameras.forEach(cam => {
+        updatePeopleCount(cam.id);
+        setInterval(() => updatePeopleCount(cam.id), 2000);
+    });
+
+    updateEventLog();
+    setInterval(updateEventLog, 1000);
+
+    // Toast tombol hapus kamera
+    document.querySelectorAll('.btn-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (confirm('Apakah Anda yakin ingin menghapus kamera ini?')) {
+                const form = btn.closest('form');
+                fetch(form.action, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('Kamera berhasil dihapus!');
+                            form.closest('.camera-container').remove();
+                        } else {
+                            showToast('Gagal menghapus kamera!');
+                        }
+                    })
+                    .catch(err => showToast('Terjadi kesalahan!'));
+            }
         });
-        updateEventLog();
-        setInterval(updateEventLog, 1000);
-    }
+    });
 
-    window.onload = startUpdatingAll;
+    // Toast tombol start/stop recording
+    document.querySelectorAll('.btn-start').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const form = btn.closest('form');
+            fetch(form.action, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.recording) {
+                        btn.innerText = 'Stop Recording';
+                        showToast('Recording dimulai!');
+                    } else {
+                        btn.innerText = 'Start Recording';
+                        showToast('Recording dihentikan!');
+                    }
+                })
+                .catch(err => showToast('Terjadi kesalahan saat mengubah recording!'));
+        });
+    });
+}
+
+window.onload = startUpdatingAll;
 </script>
-
 </body>
 </html>

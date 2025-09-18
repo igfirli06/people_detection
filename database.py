@@ -302,19 +302,18 @@ def export_person_sessions_to_excel(file_path: str):
     conn.close()
     df.to_excel(file_path, index=False)
 
-def export_empty_zone_sessions_to_excel(file_path: str):
+def export_sessions_to_excel(file_path):
     conn = get_connection()
     query = """
-        SELECT c.name AS `Nama Kamera`,
-               z.name AS `Nama Zona`,
-               ez.start_time AS `Waktu Mulai Kosong`,
-               ez.end_time AS `Waktu Selesai Kosong`,
-               ez.duration AS `Durasi Kosong (detik)`
-        FROM empty_zone_sessions ez
-        JOIN cctv c ON ez.camera_id = c.id
-        LEFT JOIN zones z ON ez.zone_id = z.id
-        ORDER BY ez.start_time DESC
+        SELECT ps.id, c.name AS name, ps.start_time, ps.end_time, ps.duration
+        FROM person_sessions ps
+        JOIN cctv c ON ps.camera_id = c.id
+        WHERE ps.end_time IS NOT NULL
+        ORDER BY ps.end_time DESC
     """
     df = pd.read_sql(query, conn)
     conn.close()
+    df['duration_formatted'] = df['duration'].apply(
+        lambda x: f"{int(x // 3600):02d}:{int((x % 3600) // 60):02d}:{int(x % 60):02d}"
+    )
     df.to_excel(file_path, index=False)
