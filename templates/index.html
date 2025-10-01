@@ -22,6 +22,8 @@
             --btn-red: #e74c3c;
             --btn-red-hover: #c0392b;
             --shadow-light: 0 4px 15px rgba(0, 0, 0, 0.08);
+            --status-active: #2ecc71;
+            --status-inactive: #e74c3c;
         }
 
         body {
@@ -104,6 +106,7 @@
             text-align: center;
             box-shadow: var(--shadow-light);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
         }
 
         .camera-container:hover {
@@ -171,6 +174,25 @@
             font-weight: 600;
         }
 
+        .zone-status {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .zone-active {
+            background-color: rgba(46, 204, 113, 0.2);
+            color: var(--status-active);
+        }
+
+        .zone-inactive {
+            background-color: rgba(231, 76, 60, 0.2);
+            color: var(--status-inactive);
+        }
+
         .log-wrapper {
             margin-top: 40px;
         }
@@ -219,6 +241,11 @@
             text-align: center;
             color: var(--text-secondary);
             font-style: italic;
+        }
+
+        .inactive-duration {
+            color: var(--status-inactive);
+            font-weight: 600;
         }
 
         .download-excel {
@@ -286,25 +313,6 @@
                 grid-template-columns: 1fr;
             }
         }
-
-        /* Toast CSS */
-        #toast {
-            visibility: hidden;
-            min-width: 250px;
-            background-color: #333;
-            color: #fff;
-            text-align: center;
-            border-radius: 8px;
-            padding: 16px;
-            position: fixed;
-            z-index: 1000;
-            left: 50%;
-            bottom: 30px;
-            transform: translateX(-50%);
-            font-size: 1rem;
-            opacity: 0;
-            transition: opacity 0.5s, bottom 0.5s;
-        }
     </style>
 </head>
 <body>
@@ -327,13 +335,15 @@
         <div class="camera-container" data-cam-id="{{ cam.id }}">
             <h2>{{ cam.name }}</h2>
             <img src="{{ url_for('video_feed', camera_id=cam.id) }}" alt="Camera {{ cam.id }}">
+            <div class="zone-status" id="zone-status-{{ cam.id }}">
+            </div>
             <div class="controls">
                 <form action="{{ url_for('toggle_record', camera_id=cam.id) }}" method="post" style="display:inline;">
                     <button type="submit" class="btn btn-start">
                         {% if recording_status.get(cam.id) %} Stop Recording {% else %} Start Recording {% endif %}
                     </button>
                 </form>
-                <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;">
+                <form action="{{ url_for('delete_camera', camera_id=cam.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Apakah Anda yakin ingin menghapus kamera ini?');">
                     <button type="submit" class="btn btn-delete">Hapus Kamera</button>
                 </form>
             </div>
@@ -352,22 +362,40 @@
     </div>
 
     <div class="log-wrapper">
-        <h2>Riwayat Sesi</h2>
+        <h2>Durasi Zona Aktif</h2>
         <table>
             <thead>
                 <tr>
                     <th>Kamera</th>
-                    <th>Zona</th>
+                    <th>Nama Zona</th>
                     <th>Waktu Masuk</th>
                     <th>Waktu Keluar</th>
-                    <th>Durasi</th>
+                    <th>Durasi Aktif</th>
                 </tr>
             </thead>
-            <tbody id="events-body">
-            </tbody>
+            <tbody id="events-body"></tbody>
         </table>
         <div style="text-align: center;">
             <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
+        </div>
+    </div>
+
+    <div class="log-wrapper">
+        <h2>Durasi Zona Tidak Aktif</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Kamera</th>
+                    <th>Nama Zona</th>
+                    <th>Waktu Mulai Tidak Aktif</th>
+                    <th>Waktu Selesai Tidak Aktif</th>
+                    <th>Durasi Tidak Aktif</th>
+                </tr>
+            </thead>
+            <tbody id="inactive-duration-body"></tbody>
+        </table>
+        <div style="text-align: center;">
+         
         </div>
     </div>
 </main>
@@ -382,131 +410,127 @@
     <p>Copyright © 2025 All for PT. Kutai Timber Indonesia</p>
 </footer>
 
-<!-- Toast -->
-<div id="toast"></div>
-
 <script>
-function showToast(message, duration = 3000) {
-    const toast = document.getElementById('toast');
-    toast.innerText = message;
-    toast.style.visibility = 'visible';
-    toast.style.opacity = '1';
-    toast.style.bottom = '50px';
+    const cameras = {{ cameras|tojson }};
 
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.bottom = '30px';
-        setTimeout(() => {
-            toast.style.visibility = 'hidden';
-        }, 500);
-    }, duration);
-}
-
-const cameras = {{ cameras|tojson }};
-const previousCounts = {};  // untuk track jumlah orang sebelumnya
-
-function updatePeopleCount(cameraId) {
-    fetch(`/person_count/${cameraId}`)
-        .then(res => res.json())
-        .then(data => {
-            const countElement = document.getElementById(`people-count-${cameraId}`);
-            if (countElement) {
-                const prevCount = previousCounts[cameraId] || 0;
-                countElement.innerText = data.count;
-
-                // Toast masuk/keluar orang
-                if (data.count > prevCount) {
-                    showToast(`Orang masuk di Kamera ${cameraId}: ${data.count}`);
-                } else if (data.count < prevCount) {
-                    showToast(`Orang keluar di Kamera ${cameraId}: ${data.count}`);
-                }
-                previousCounts[cameraId] = data.count;
+    function updateZoneStatus(cameraId, status) {
+        const statusElement = document.getElementById(`zone-status-${cameraId}`);
+        if (statusElement) {
+            if (status === 'active') {
+                statusElement.className = 'zone-status zone-active';
+                statusElement.innerHTML = '<i class="fas fa-check-circle"></i> Zona Aktif';
+            } else {
+                statusElement.className = 'zone-status zone-inactive';
+                statusElement.innerHTML = '<i class="fas fa-times-circle"></i> Zona Tidak Aktif';
             }
-        })
-        .catch(err => console.error("Error updating people count:", err));
-}
+        }
+    }
+
+    function updatePeopleCount(cameraId) {
+        fetch(`/person_count/${cameraId}`)
+            .then(res => res.json())
+            .then(data => {
+                const countElement = document.getElementById(`people-count-${cameraId}`);
+                if (countElement) {
+                    countElement.innerText = data.count;
+                    
+                    if (data.count > 0) {
+                        updateZoneStatus(cameraId, 'active');
+                    } else {
+                        updateZoneStatus(cameraId, 'inactive');
+                    }
+                }
+            })
+            .catch(err => console.error("Error updating people count:", err));
+    }
 
 function updateEventLog() {
-    fetch("/events_json")
-        .then(res => res.json())
+    fetch('/events_json')
+        .then(response => response.json())
         .then(data => {
-            const tableBody = document.getElementById("events-body");
-            let htmlContent = '';
-            if (!data || data.length === 0) {
-                htmlContent = `<tr><td colspan="5" class="no-data">Belum ada data sesi</td></tr>`;
-            } else {
-                data.forEach(event => {
-                    const durationText = event.duration ? event.duration : '<span style="color: green; font-weight: bold;">Sesi Aktif</span>';
-                    const endTimeText = event.end_time !== 'Sesi Aktif' && event.end_time !== 'Belum ada data sesi' ? event.end_time : '<span style="color: green; font-weight: bold;">-</span>';
-                    const zoneNameText = event.zone_name || '<span style="color: #7f8c8d;">Tanpa Zona</span>';
+            const tableBody = document.getElementById('events-body');
+            const inactiveBody = document.getElementById('inactive-duration-body');
+            tableBody.innerHTML = '';
+            inactiveBody.innerHTML = '';
 
-                    htmlContent += `
-                        <tr>
-                            <td>${event.camera_name}</td>
-                            <td>${zoneNameText}</td>
-                            <td>${event.start_time}</td>
-                            <td>${endTimeText}</td>
-                            <td>${durationText}</td>
-                        </tr>`;
-                });
+            if (data.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="no-data">Tidak ada data sesi</td></tr>';
+                inactiveBody.innerHTML = '<tr><td colspan="5" class="no-data">Tidak ada data durasi tidak aktif</td></tr>';
+                return;
             }
-            tableBody.innerHTML = htmlContent;
-        })
-        .catch(err => console.error("Error updating event log:", err));
-}
 
-function startUpdatingAll() {
-    cameras.forEach(cam => {
-        updatePeopleCount(cam.id);
-        setInterval(() => updatePeopleCount(cam.id), 2000);
-    });
+            const seenSessions = new Set();
+            const seenInactive = new Set();
 
-    updateEventLog();
-    setInterval(updateEventLog, 1000);
-
-    // Toast tombol hapus kamera
-    document.querySelectorAll('.btn-delete').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (confirm('Apakah Anda yakin ingin menghapus kamera ini?')) {
-                const form = btn.closest('form');
-                fetch(form.action, { method: 'POST' })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            showToast('Kamera berhasil dihapus!');
-                            form.closest('.camera-container').remove();
-                        } else {
-                            showToast('Gagal menghapus kamera!');
+            data.forEach(event => {
+                if (event.type !== 'inactive') {
+                    const sessionKey = `${event.camera_id}_${event.start_time}`;
+                    
+                    if (!seenSessions.has(sessionKey)) {
+                        seenSessions.add(sessionKey);
+                        
+                        if (!event.start_time || event.start_time === '-') {
+                            return;
                         }
-                    })
-                    .catch(err => showToast('Terjadi kesalahan!'));
-            }
-        });
-    });
-
-    // Toast tombol start/stop recording
-    document.querySelectorAll('.btn-start').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const form = btn.closest('form');
-            fetch(form.action, { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.recording) {
-                        btn.innerText = 'Stop Recording';
-                        showToast('Recording dimulai!');
-                    } else {
-                        btn.innerText = 'Start Recording';
-                        showToast('Recording dihentikan!');
+                        
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${event.camera_name || 'Unknown'}</td>
+                            <td>${event.zone_name || 'Unknown'}</td>
+                            <td>${event.start_time || '-'}</td>
+                            <td>${event.end_time || '-'}</td>
+                            <td>${event.duration || '0 detik'}</td>
+                        `;
+                        tableBody.appendChild(row);
                     }
-                })
-                .catch(err => showToast('Terjadi kesalahan saat mengubah recording!'));
-        });
-    });
+                }
+
+                if (event.type === 'inactive') {
+                    const inactiveKey = `${event.camera_id}_${event.inactive_start_time}`;
+                    
+                    if (!seenInactive.has(inactiveKey)) {
+                        seenInactive.add(inactiveKey);
+
+                        if (!event.inactive_start_time || event.inactive_start_time === '-') {
+                            return;
+                        }
+                        
+                        const inactiveRow = document.createElement('tr');
+                        inactiveRow.innerHTML = `
+                            <td>${event.camera_name || 'Unknown'}</td>
+                            <td>${event.zone_name || 'Unknown'}</td>
+                            <td>${event.inactive_start_time || '-'}</td>
+                            <td>${event.inactive_end_time || '-'}</td>
+                            <td class="inactive-duration">${event.inactive_duration}</td>
+                        `;
+                        inactiveBody.appendChild(inactiveRow);
+                    }
+                }
+            });
+
+            if (tableBody.innerHTML === '') {
+                tableBody.innerHTML = '<tr><td colspan="5" class="no-data">Tidak ada data sesi</td></tr>';
+            }
+            if (inactiveBody.innerHTML === '') {
+                inactiveBody.innerHTML = '<tr><td colspan="5" class="no-data">Tidak ada data durasi tidak aktif</td></tr>';
+            }
+        })
+        .catch(err => console.error("Error updateEventLog:", err));
 }
 
-window.onload = startUpdatingAll;
+
+    function startUpdatingAll() {
+        cameras.forEach(cam => {
+            updateZoneStatus(cam.id, 'inactive');
+            updatePeopleCount(cam.id);
+            setInterval(() => updatePeopleCount(cam.id), 2000);
+        });
+        updateEventLog();
+        setInterval(updateEventLog, 1000);
+    }
+
+    window.onload = startUpdatingAll;
 </script>
+
 </body>
 </html>

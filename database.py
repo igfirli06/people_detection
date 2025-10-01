@@ -72,7 +72,6 @@ def create_tables():
         cur.close()
         conn.close()
 
-# ===================== CAMERA & ZONES =====================
 def load_cameras_from_db():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
@@ -168,7 +167,6 @@ def delete_zone_by_id(zone_id: int):
         cur.close()
         conn.close()
 
-# ===================== PERSON SESSIONS =====================
 def save_person_session_start(camera_id: int, zone_id: int, tracking_id: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -221,7 +219,7 @@ def get_person_sessions(limit: int = 20) -> List[Dict[str, Any]]:
     try:
         cur.execute("""
             SELECT ps.id, ps.camera_id, ps.tracking_id, ps.start_time, ps.end_time, ps.duration,
-                   c.name AS camera_name, z.name AS zone_name
+                   c.name AS camera_name, z.zone_name AS zone_name
             FROM person_sessions ps
             JOIN cctv c ON ps.camera_id = c.id
             LEFT JOIN zones z ON ps.zone_id = z.id
@@ -233,7 +231,6 @@ def get_person_sessions(limit: int = 20) -> List[Dict[str, Any]]:
         cur.close()
         conn.close()
 
-# ===================== EMPTY ZONE SESSIONS =====================
 def save_empty_zone_session(camera_id, zone_id, start_time, end_time):
     conn = get_connection()
     cur = conn.cursor()
@@ -245,26 +242,8 @@ def save_empty_zone_session(camera_id, zone_id, start_time, end_time):
         """, (camera_id, zone_id, start_time, end_time, duration_seconds))
         conn.commit()
     except Exception as e:
-        print(f"Error saving empty zone session: {e}")
-        if conn: conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-
-def get_empty_zone_sessions(limit=50):
-    conn = get_connection()
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("""
-            SELECT ez.id, ez.camera_id, c.name AS camera_name, ez.zone_id, z.name AS zone_name,
-                   ez.start_time, ez.end_time, ez.duration
-            FROM empty_zone_sessions ez
-            JOIN cctv c ON ez.camera_id = c.id
-            LEFT JOIN zones z ON ez.zone_id = z.id
-            ORDER BY ez.start_time DESC
-            LIMIT %s
-        """, (limit,))
-        return cur.fetchall()
+        print(f"[DB] Gagal simpan empty_zone_sessions: {e}")
+        conn.rollback()
     finally:
         cur.close()
         conn.close()
@@ -281,14 +260,39 @@ def get_min_duration_for_camera(camera_id: int) -> int:
         cur.close()
         conn.close()
 
-# =====================================================
-# EKSPOR EXCEL
-# =====================================================
+def get_empty_zone_sessions(limit=50):
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT 
+                ezs.id,
+                ezs.camera_id,
+                c.name AS camera_name,
+                ezs.zone_id,
+                z.zone_name AS zone_name,
+                ezs.start_time,
+                ezs.end_time,
+                ezs.duration
+            FROM empty_zone_sessions ezs
+            JOIN cctv c ON ezs.camera_id = c.id
+            LEFT JOIN zones z ON ezs.zone_id = z.id
+            ORDER BY ezs.start_time DESC
+            LIMIT %s
+        """, (limit,))
+        return cur.fetchall()
+    except Exception as e:
+        print(f"[DB] Gagal ambil empty_zone_sessions: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
 def export_person_sessions_to_excel(file_path: str):
     conn = get_connection()
     query = """
         SELECT c.name AS `Nama Kamera`,
-               z.name AS `Nama Zona`,
+               z.zone_name AS `Nama Zona`,
                ps.tracking_id AS `Tracking ID`,
                ps.start_time AS `Waktu Masuk`,
                ps.end_time AS `Waktu Keluar`,

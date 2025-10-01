@@ -97,23 +97,68 @@
             color: #357abd;
             text-decoration: underline;
         }
+
+        .message {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .error { color: red; }
+        .success { color: green; }
     </style>
 </head>
 <body>
     <div class="form-container">
         <h1>Add New Camera</h1>
 
-        <form method="post" action="{{ url_for('add_camera') }}">
+        <form id="cameraForm" method="post" action="{{ url_for('add_camera') }}">
             <label for="name">Camera Name</label>
-            <input type="text" id="name" name="name" placeholder="Enter camera name" required />
+            <input type="text" id="name" name="name" placeholder="Enter camera name" />
 
             <label for="rtsp_url">RTSP URL</label>
-            <input type="url" id="rtsp_url" name="rtsp_url" placeholder="rtsp://example.com/stream" required />
+            <input type="url" id="rtsp_url" name="rtsp_url" placeholder="rtsp://example.com/stream" />
 
             <button type="submit">Add Camera</button>
         </form>
 
+        <div id="message" class="message"></div>
+
         <a href="{{ url_for('index') }}" class="back-link">Kembali ke halaman utama</a>
     </div>
+
+    <script>
+        document.getElementById("cameraForm").addEventListener("submit", function(event) {
+            event.preventDefault(); // Cegah submit default
+
+            const name = document.getElementById("name").value.trim();
+            const rtsp = document.getElementById("rtsp_url").value.trim();
+            const message = document.getElementById("message");
+
+            // regex sederhana untuk RTSP
+            const rtspRegex = /^rtsp:\/\/.+/;
+
+            if (!name && !rtsp) {
+                message.textContent = "Harap isi Nama kamera dan link!";
+                message.className = "message error";
+            } else if (name && !rtsp) {
+                message.textContent = "Harap isi link rtsp!";
+                message.className = "message error";
+            } else if (!name && rtsp) {
+                message.textContent = "Harap isi Nama kamera!";
+                message.className = "message error";
+            } else if (!rtspRegex.test(rtsp)) {
+                message.textContent = "Maaf Nama kamera dan Link Rtsp salah! Contoh: rtsp://admin:kutaitimber121@192.168.1.64:554/Streaming/Channels/101";
+                message.className = "message error";
+            } else {
+                message.textContent = "Sukses!";
+                message.className = "message success";
+
+                // Jika valid, baru submit form
+                this.submit();
+            }
+        });
+    </script>
 </body>
 </html>
