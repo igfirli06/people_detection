@@ -1,8 +1,12 @@
+from flask import app
 import mysql.connector
 from datetime import datetime
 import pandas as pd
 import json
 from typing import List, Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_connection():
     return mysql.connector.connect(
@@ -248,7 +252,6 @@ def save_empty_zone_session(camera_id, zone_id, start_time, end_time):
         cur.close()
         conn.close()
 
-# ===================== UTILITIES =====================
 def get_min_duration_for_camera(camera_id: int) -> int:
     conn = get_connection()
     cur = conn.cursor()
@@ -260,64 +263,198 @@ def get_min_duration_for_camera(camera_id: int) -> int:
         cur.close()
         conn.close()
 
-def get_empty_zone_sessions(limit=50):
+def get_empty_zone_sessions(limit=1000):
+    """Mengambil sesi zona tidak aktif dari database - VERSION FIXED"""
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("""
+        # Cek struktur tabel zones untuk menentukan nama kolom
+        cur.execute("SHOW COLUMNS FROM zones LIKE 'name'")
+        has_name_column = cur.fetchone()
+        
+        cur.execute("SHOW COLUMNS FROM zones LIKE 'zone_name'") 
+        has_zone_name_column = cur.fetchone()
+        
+        # Tentukan nama kolom zone berdasarkan struktur sebenarnya
+        if has_name_column:
+            zone_name_field = "z.name"
+        elif has_zone_name_column:
+            zone_name_field = "z.zone_name"
+        else:
+            zone_name_field = "NULL"  # Fallback
+            
+        print(f"DEBUG: Using zone name field: {zone_name_field}")
+        
+        query = f"""
             SELECT 
-                ezs.id,
-                ezs.camera_id,
+                ez.id,
+                ez.camera_id,
                 c.name AS camera_name,
-                ezs.zone_id,
-                z.zone_name AS zone_name,
-                ezs.start_time,
-                ezs.end_time,
-                ezs.duration
-            FROM empty_zone_sessions ezs
-            JOIN cctv c ON ezs.camera_id = c.id
-            LEFT JOIN zones z ON ezs.zone_id = z.id
-            ORDER BY ezs.start_time DESC
+                ez.zone_id,
+                {zone_name_field} AS zone_name,
+                ez.start_time,
+                ez.end_time,
+                ez.duration
+            FROM empty_zone_sessions ez
+            JOIN cctv c ON ez.camera_id = c.id
+            LEFT JOIN zones z ON ez.zone_id = z.id
+            WHERE ez.duration > 0 OR ez.end_time IS NOT NULL
+            ORDER BY ez.start_time DESC
             LIMIT %s
-        """, (limit,))
-        return cur.fetchall()
+        """
+        
+        print(f"DEBUG: Executing query: {query}")
+        cur.execute(query, (limit,))
+        sessions = cur.fetchall()
+        
+        print(f"=== DEBUG EMPTY ZONE SESSIONS ===")
+        print(f"Query successful. Found {len(sessions)} records")
+        
+        if sessions:
+            for i, session in enumerate(sessions):
+                print(f"Record {i+1}: ID={session['id']}, Camera={session.get('camera_name', 'N/A')}, "
+                      f"Zone={session.get('zone_name', 'N/A')}, Duration={session.get('duration', 0)}s")
+        else:
+            print("No records found in empty_zone_sessions table")
+            # Cek apakah tabel kosong
+            cur.execute("SELECT COUNT(*) as total FROM empty_zone_sessions")
+            total_count = cur.fetchone()['total']
+            print(f"Total records in empty_zone_sessions table: {total_count}")
+            
+        print("=================================")
+        
+        return sessions
+        
     except Exception as e:
-        print(f"[DB] Gagal ambil empty_zone_sessions: {e}")
+        print(f"ERROR in get_empty_zone_sessions: {e}")
         return []
     finally:
         cur.close()
         conn.close()
 
-def export_person_sessions_to_excel(file_path: str):
+def generate_real_empty_zone_data():
+    """Generate data real untuk empty_zone_sessions berdasarkan data yang ada - FIXED"""
     conn = get_connection()
-    query = """
-        SELECT c.name AS `Nama Kamera`,
-               z.zone_name AS `Nama Zona`,
-               ps.tracking_id AS `Tracking ID`,
-               ps.start_time AS `Waktu Masuk`,
-               ps.end_time AS `Waktu Keluar`,
-               ps.duration AS `Durasi (detik)`
-        FROM person_sessions ps
-        JOIN cctv c ON ps.camera_id = c.id
-        LEFT JOIN zones z ON ps.zone_id = z.id
-        ORDER BY ps.start_time DESC
-    """
-    df = pd.read_sql(query, conn)
-    conn.close()
-    df.to_excel(file_path, index=False)
+    cur = conn.cursor(dictionary=True)
+    
+    try:
+        # Query yang lebih sederhana dan robust
+        query = """
+            SELECT 
+                camera_id,
+                zone_id,
+                MAX(end_time) as last_end_time
+            FROM person_sessions 
+            WHERE end_time IS NOT NULL
+            GROUP BY camera_id, zone_id
+            HAVING last_end_time < NOW() - INTERVAL 1 MINUTE
+            LIMIT 5
+        """
+        
+        cur.execute(query)
+        recent_sessions = cur.fetchall()
+        
+        inserted_count = 0
+        for session in recent_sessions:
+            if session['last_end_time']:
+                # Buat empty session dari last_end_time sampai sekarang
+                start_time = session['last_end_time']
+                end_time = datetime.now()
+                duration = int((end_time - start_time).total_seconds())
+                
+                if duration > 60:  # Minimal 1 menit
+                    cur.execute(
+                        "INSERT INTO empty_zone_sessions (camera_id, zone_id, start_time, end_time, duration) VALUES (%s, %s, %s, %s, %s)",
+                        (session['camera_id'], session['zone_id'], start_time, end_time, duration)
+                    )
+                    inserted_count += 1
+                    print(f"Generated empty session: Camera {session['camera_id']}, Zone {session['zone_id']}, Duration {duration}s")
+        
+        conn.commit()
+        print(f"Generated {inserted_count} real empty zone sessions")
+        return inserted_count
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"Error generating empty zone data: {e}")
+        return 0
+    finally:
+        cur.close()
+        conn.close()
 
-def export_sessions_to_excel(file_path):
+def get_person_sessions(limit: int = 1000) -> List[Dict[str, Any]]:
+    """Mengambil sesi zona aktif dari database - FIXED untuk handle sesi aktif"""
     conn = get_connection()
-    query = """
-        SELECT ps.id, c.name AS name, ps.start_time, ps.end_time, ps.duration
-        FROM person_sessions ps
-        JOIN cctv c ON ps.camera_id = c.id
-        WHERE ps.end_time IS NOT NULL
-        ORDER BY ps.end_time DESC
-    """
-    df = pd.read_sql(query, conn)
-    conn.close()
-    df['duration_formatted'] = df['duration'].apply(
-        lambda x: f"{int(x // 3600):02d}:{int((x % 3600) // 60):02d}:{int(x % 60):02d}"
-    )
-    df.to_excel(file_path, index=False)
+    cur = conn.cursor(dictionary=True)
+    try:
+        # Cek struktur tabel zones untuk menentukan nama kolom
+        cur.execute("SHOW COLUMNS FROM zones LIKE 'name'")
+        has_name_column = cur.fetchone()
+        
+        cur.execute("SHOW COLUMNS FROM zones LIKE 'zone_name'") 
+        has_zone_name_column = cur.fetchone()
+        
+        # Tentukan nama kolom zone berdasarkan struktur sebenarnya
+        if has_name_column:
+            zone_name_field = "z.name"
+        elif has_zone_name_column:
+            zone_name_field = "z.zone_name"
+        else:
+            zone_name_field = "NULL"
+            
+        query = f"""
+            SELECT 
+                ps.id,
+                ps.camera_id,
+                c.name AS camera_name,
+                ps.zone_id,
+                {zone_name_field} AS zone_name,
+                ps.start_time,
+                ps.end_time,
+                ps.duration,
+                CASE 
+                    WHEN ps.end_time IS NULL THEN 'Sesi Aktif'
+                    ELSE 'Selesai'
+                END AS status
+            FROM person_sessions ps
+            JOIN cctv c ON ps.camera_id = c.id
+            LEFT JOIN zones z ON ps.zone_id = z.id
+            WHERE ps.duration > 0 OR ps.end_time IS NULL
+            ORDER BY ps.start_time DESC
+            LIMIT %s
+        """
+        
+        cur.execute(query, (limit,))
+        sessions = cur.fetchall()
+        
+        print(f"=== DEBUG PERSON SESSIONS ===")
+        print(f"Query successful. Found {len(sessions)} records")
+        
+        # Hitung durasi untuk sesi yang masih aktif
+        now = datetime.now()
+        for session in sessions:
+            if session['end_time'] is None and session['duration'] is None:
+                # Hitung durasi untuk sesi aktif
+                start_time = session['start_time']
+                if isinstance(start_time, str):
+                    start_time = datetime.fromisoformat(str(start_time))
+                duration_seconds = int((now - start_time).total_seconds())
+                session['duration'] = duration_seconds
+                session['end_time'] = None  # Tetap None untuk menandakan sesi aktif
+            elif session['end_time'] is None and session['duration'] is not None:
+                # Durasi sudah dihitung, tetap gunakan
+                pass
+                
+        if sessions:
+            for i, session in enumerate(sessions):
+                print(f"Record {i+1}: ID={session['id']}, Status={session['status']}, "
+                      f"Camera={session.get('camera_name', 'N/A')}, Duration={session.get('duration', 0)}s")
+        print("=================================")
+        
+        return sessions
+    except Exception as e:
+        print(f"ERROR getting person sessions: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()

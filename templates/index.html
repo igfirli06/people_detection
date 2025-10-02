@@ -361,43 +361,41 @@
         {% endfor %}
     </div>
 
-    <div class="log-wrapper">
-        <h2>Durasi Zona Aktif</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Kamera</th>
-                    <th>Nama Zona</th>
-                    <th>Waktu Masuk</th>
-                    <th>Waktu Keluar</th>
-                    <th>Durasi Aktif</th>
-                </tr>
-            </thead>
-            <tbody id="events-body"></tbody>
-        </table>
-        <div style="text-align: center;">
-            <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
-        </div>
-    </div>
+ <div class="log-wrapper">
+    <h2>Durasi Zona Aktif</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Kamera</th>
+                <th>Nama Zona</th>
+                <th>Waktu Masuk</th>
+                <th>Waktu Keluar</th>
+                <th>Durasi Aktif</th>
+            </tr>
+        </thead>
+        <tbody id="events-body"></tbody>
+    </table>
+</div>
 
-    <div class="log-wrapper">
-        <h2>Durasi Zona Tidak Aktif</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Kamera</th>
-                    <th>Nama Zona</th>
-                    <th>Waktu Mulai Tidak Aktif</th>
-                    <th>Waktu Selesai Tidak Aktif</th>
-                    <th>Durasi Tidak Aktif</th>
-                </tr>
-            </thead>
-            <tbody id="inactive-duration-body"></tbody>
-        </table>
-        <div style="text-align: center;">
-         
-        </div>
+<div class="log-wrapper">
+    <h2>Durasi Zona Tidak Aktif</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Kamera</th>
+                <th>Nama Zona</th>
+                <th>Waktu Mulai Tidak Aktif</th>
+                <th>Waktu Selesai Tidak Aktif</th>
+                <th>Durasi Tidak Aktif</th>
+            </tr>
+        </thead>
+        <tbody id="inactive-duration-body"></tbody>
+    </table>
+    <div style="text-align: center;">
+        <a href="{{ url_for('download_events') }}" class="download-excel">Download Excel</a>
     </div>
+</div>
+
 </main>
 
 <footer>

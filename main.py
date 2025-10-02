@@ -1,3 +1,4 @@
+from io import BytesIO
 import os
 import time
 import threading
@@ -29,8 +30,8 @@ from database import (
     load_cameras_from_db,
     get_connection,
     update_person_session_end,
-    export_sessions_to_excel,
-    export_person_sessions_to_excel,
+    get_person_sessions,       
+    get_empty_zone_sessions, 
 )
 
 
@@ -46,7 +47,6 @@ os.makedirs(EXPORTS_DIR, exist_ok=True)
 MIN_SESSION_DURATION = 10
 DEBUG_DRAW_ALL = True
 pending_notifications = collections.deque(maxlen=20) 
-# Hapus variabel global last_state, start_time, zona_aktif, zona_tidak_aktif
 pending_end_sessions = {}
 
 app = Flask(__name__)
@@ -845,6 +845,157 @@ def events_json():
         app.logger.error(f"Gagal ambil events_json: {ex}", exc_info=True)
         return jsonify([]), 500
 
+def process_person_sessions_data(person_sessions_data):
+    if not person_sessions_data:
+        return pd.DataFrame()
+    
+    data = []
+    for session in person_sessions_data:
+        data.append({
+            'ID Sesi': session.get('id', ''),
+            'Kamera': session.get('camera_name', ''),
+            'Zona': session.get('zone_name', 'Tanpa Zona'),
+            'Waktu Mulai': session.get('start_time', '').strftime('%Y-%m-%d %H:%M:%S') if session.get('start_time') else '',
+            'Waktu Selesai': session.get('end_time', '').strftime('%Y-%m-%d %H:%M:%S') if session.get('end_time') else '',
+            'Durasi (detik)': session.get('duration', 0),
+            'Jumlah Orang': session.get('people_count', 0),
+            'Status': 'Selesai'
+        })
+    
+    return pd.DataFrame(data)
+
+def process_empty_zone_sessions_data(empty_sessions_data):
+    if not empty_sessions_data:
+        return pd.DataFrame()
+    
+    data = []
+    for session in empty_sessions_data:
+        data.append({
+            'ID Sesi': session.get('id', ''),
+            'Kamera': session.get('camera_name', ''),
+            'Zona': session.get('zone_name', 'Tanpa Zona'),
+            'Waktu Mulai': session.get('start_time', '').strftime('%Y-%m-%d %H:%M:%S') if session.get('start_time') else '',
+            'Waktu Selesai': session.get('end_time', '').strftime('%Y-%m-%d %H:%M:%S') if session.get('end_time') else '',
+            'Durasi (detik)': session.get('duration', 0),
+            'Jumlah Orang': 0,
+            'Status': 'Zona Kosong'
+        })
+    
+    return pd.DataFrame(data)
+
+# Fungsi untuk mendapatkan data person sessions dari database
+def get_person_sessions(limit=1000):
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT ps.id, ps.camera_id, ps.zone_id, ps.start_time, ps.end_time, ps.duration,
+                   ps.people_count, z.zone_name, c.name as camera_name
+            FROM person_sessions ps
+            LEFT JOIN zones z ON ps.zone_id = z.id
+            LEFT JOIN cctv c ON ps.camera_id = c.id
+            WHERE ps.end_time IS NOT NULL
+            ORDER BY ps.start_time DESC
+            LIMIT %s
+        """, (limit,))
+        result = cur.fetchall()
+        conn.close()
+        return result
+    except Exception as e:
+        app.logger.error(f"Gagal mengambil data person sessions: {e}")
+        return []
+
+# Fungsi untuk mendapatkan data empty zone sessions dari database
+def get_empty_zone_sessions(limit=1000):
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT ezs.id, ezs.camera_id, ezs.zone_id, ezs.start_time, ezs.end_time, ezs.duration,
+                   z.zone_name, c.name as camera_name
+            FROM empty_zone_sessions ezs
+            LEFT JOIN zones z ON ezs.zone_id = z.id
+            LEFT JOIN cctv c ON ezs.camera_id = c.id
+            WHERE ezs.end_time IS NOT NULL
+            ORDER BY ezs.start_time DESC
+            LIMIT %s
+        """, (limit,))
+        result = cur.fetchall()
+        conn.close()
+        return result
+    except Exception as e:
+        app.logger.error(f"Gagal mengambil data empty zone sessions: {e}")
+        return []
+
+@app.route("/download_events")
+def download_events():
+    try:
+        # Ambil data dari database
+        person_sessions_data = get_person_sessions(limit=1000)
+        empty_zone_sessions_data = get_empty_zone_sessions(limit=1000)
+        
+        app.logger.info(f"Data untuk Excel - Zona Aktif: {len(person_sessions_data)} records, Zona Tidak Aktif: {len(empty_zone_sessions_data)} records")
+
+        # Proses data menjadi DataFrame
+        df_person = process_person_sessions_data(person_sessions_data)
+        df_empty = process_empty_zone_sessions_data(empty_zone_sessions_data)
+
+        # Buat file Excel dalam memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            # Sheet untuk Zona Aktif (Person Sessions)
+            if not df_person.empty:
+                df_person.to_excel(writer, sheet_name="Durasi Zona Aktif", index=False)
+                # Auto-adjust column widths
+                worksheet = writer.sheets["Durasi Zona Aktif"]
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            else:
+                pd.DataFrame({"Pesan": ["Tidak ada data zona aktif"]}).to_excel(writer, sheet_name="Durasi Zona Aktif", index=False)
+            
+            # Sheet untuk Zona Tidak Aktif (Empty Zone Sessions)
+            if not df_empty.empty:
+                df_empty.to_excel(writer, sheet_name="Durasi Zona Tidak Aktif", index=False)
+                # Auto-adjust column widths
+                worksheet = writer.sheets["Durasi Zona Tidak Aktif"]
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            else:
+                pd.DataFrame({"Pesan": ["Tidak ada data zona tidak aktif"]}).to_excel(writer, sheet_name="Durasi Zona Tidak Aktif", index=False)
+        
+        output.seek(0)
+
+        # Kirim file sebagai response
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=f"Laporan_Durasi_Zona_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except Exception as e:
+        app.logger.error(f"Gagal download sessions: {e}", exc_info=True)
+        flash("Gagal membuat laporan Excel", "error")
+        return redirect(url_for("index"))
+
 @app.route("/add_camera", methods=["GET", "POST"])
 def add_camera():
     if request.method == "POST":
@@ -916,22 +1067,41 @@ def delete_zone_new(zone_id):
 def person_count_route(camera_id: int):
     return jsonify({"count": int(people_count.get(camera_id, 0))})
 
-@app.route("/download_events")
-def download_events():
+@app.route("/debug_empty_sessions")
+def debug_empty_sessions():
+    """Debug route untuk cek data empty_zone_sessions"""
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    
     try:
-        export_path = os.path.join(EXPORTS_DIR, "sessions.xlsx")
-        person_sessions = get_person_sessions(limit=1000)
-        empty_zone_sessions = get_empty_zone_sessions(limit=1000)
-        df_person = pd.DataFrame(person_sessions)
-        df_empty = pd.DataFrame(empty_zone_sessions)
-        with pd.ExcelWriter(export_path) as writer:
-            df_person.to_excel(writer, sheet_name="Person Sessions", index=False)
-            df_empty.to_excel(writer, sheet_name="Empty Zone Sessions", index=False)
-
-        return send_file(export_path, as_attachment=True)
+        # Cek struktur tabel
+        cur.execute("DESCRIBE empty_zone_sessions")
+        table_structure = cur.fetchall()
+        
+        # Cek total data
+        cur.execute("SELECT COUNT(*) as total FROM empty_zone_sessions")
+        total_count = cur.fetchone()['total']
+        
+        # Cek data dengan durasi > 0
+        cur.execute("SELECT COUNT(*) as with_duration FROM empty_zone_sessions WHERE duration > 0")
+        with_duration = cur.fetchone()['with_duration']
+        
+        # Ambil sample data
+        cur.execute("SELECT * FROM empty_zone_sessions ORDER BY id DESC LIMIT 5")
+        sample_data = cur.fetchall()
+        
+        return jsonify({
+            "table_structure": table_structure,
+            "total_records": total_count,
+            "records_with_duration": with_duration,
+            "sample_data": sample_data
+        })
+        
     except Exception as e:
-        app.logger.error(f"Gagal download sessions: {e}")
-        return "Gagal download sessions", 500
+        return jsonify({"error": str(e)})
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route("/toggle_record/<int:camera_id>", methods=["POST"])
 def toggle_record(camera_id: int):
