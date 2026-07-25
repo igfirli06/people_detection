@@ -1,7 +1,7 @@
 tech stack: 
 1. core logic and AI (obejct detection)
 Python: Bahasa pemrograman utama.
-Ultralytics YOLOv8: Framework AI yang digunakan untuk mendeteksi dan melacak (tracking) objek (orang) secara real-time. Di kode ini, kamu menggunakan yolov8n.pt (model nano yang cepat).
+Ultralytics YOLOv8: Framework AI yang digunakan untuk mendeteksi dan melacak (tracking) objek (orang) secara real-time. Dalam kode menggunakan yolov8n.pt (model nano yang cepat).
 OpenCV (cv2): Digunakan untuk pemrosesan gambar, seperti membaca stream RTSP dari kamera, menggambar bounding box, menangani poligon zona, dan mengolah video (VideoWriter).
 NumPy: Digunakan untuk operasi matriks dan perhitungan koordinat poligon zona.
 
@@ -19,7 +19,7 @@ Pandas: Digunakan (dalam impor) yang biasanya ditujukan untuk manipulasi data at
 
 4. Communication & Protokol
 RTSP (Real-Time Streaming Protocol): Protokol yang digunakan untuk mengambil source video dari CCTV/IP Camera.
-Requests: Digunakan untuk mengirim notifikasi ke sistem eksternal (dalam kode kamu: http://p2.kti.co.id/checkNotif).
+Requests: Digunakan untuk mengirim notifikasi ke sistem eksternal (dalam kode: http://p2.kti.co.id/checkNotif).
 Multipart HTTP Stream: Teknik yang digunakan Flask untuk mengirimkan frame-by-frame gambar ke browser sehingga terlihat seperti video (mjpeg).
 
 Arsitektur Aliran Data
